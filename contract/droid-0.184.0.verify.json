@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-31T18:45:26.225Z",
+  "droidVersion": "0.184.0",
+  "routes": {
+    "chat": {
+      "verbatimOmpToken": "200",
+      "systemStripped": "403",
+      "genericContent": "403"
+    },
+    "messages": {
+      "verbatimOmpToken": "200",
+      "systemStripped": "403",
+      "genericContent": "403"
+    },
+    "responses": {
+      "verbatimOmpToken": "200",
+      "systemStripped": "403",
+      "genericContent": "403"
+    }
+  }
+}

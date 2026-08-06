@@ -2,11 +2,10 @@ import type { ProviderConfig } from "@oh-my-pi/pi-coding-agent";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { Api, Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import { createProviderErrorMessage } from "@oh-my-pi/pi-ai/providers/error-message";
-import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import type { Context } from "@oh-my-pi/pi-ai/types";
+import { streamSimple, type AssistantMessage, type Context } from "@oh-my-pi/pi-ai";
 
-import { familyOf } from "./catalog";
+import { familyOf, upstreamProviderFor } from "./catalog";
 import {
   ANTHROPIC_VERSION,
   FACTORY_API,
@@ -114,10 +113,123 @@ function errorStream(model: Model<Api>, message: string): AssistantMessageEventS
   return stream;
 }
 
-function targetApiFor(modelId: string): FactoryTargetApi | null {
-  const family = familyOf(modelId);
+type FactoryDiagnosticArgs = {
+  model: Model<Api>;
+  targetApi: FactoryTargetApi;
+  credential: ParsedCredential;
+  apiEndpoint: string;
+};
 
-  switch (family) {
+function looksLikeFactoryForbidden(status: number | undefined, message: string | undefined): boolean {
+  if (status === 403) {
+    return true;
+  }
+
+  if (!message) {
+    return false;
+  }
+
+  return message.startsWith("403") && /forbidden/i.test(message);
+}
+
+function redactIdentifier(value: string | null | undefined): string {
+  if (!value) {
+    return "missing";
+  }
+
+  if (value.length <= 12) {
+    return value;
+  }
+
+  return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+function statusFromUnknownError(error: unknown): number | undefined {
+  if (isRecord(error) && typeof error.status === "number") {
+    return error.status;
+  }
+
+  return undefined;
+}
+
+function factoryForbiddenDiagnostic(args: FactoryDiagnosticArgs & { originalMessage: string | undefined }): string {
+  const orgId = args.credential.orgId ?? FACTORY_ORG_ID;
+  const redactedOrgId = redactIdentifier(orgId);
+  const credentialApiEndpoint = args.credential.apiEndpoint ?? "default";
+  const baseOverride = FACTORY_API_BASE_OVERRIDDEN ? "yes" : "no";
+  const upstream = args.originalMessage ?? "403 Forbidden";
+
+  return (
+    `factory: Factory gateway returned 403 Forbidden for ${args.model.provider}/${args.model.id} ` +
+    `via ${args.targetApi} at ${args.apiEndpoint}. ` +
+    "The credential resolved, but Factory refused the LLM request. " +
+    "Check Factory org/model entitlement for this account, unset FACTORY_API_KEY/FACTORY_API_BASE if they are " +
+    "overriding OAuth, then run `/logout factory` and `/login factory` if the org changed. " +
+    `Request context: X-Factory-Org-Id=${redactedOrgId}; credentialApiEndpoint=${credentialApiEndpoint}; ` +
+    `FACTORY_API_BASE override=${baseOverride}. ` +
+    `Upstream response: ${upstream}`
+  );
+}
+
+function enrichFactoryForbiddenError(message: AssistantMessage, args: FactoryDiagnosticArgs): AssistantMessage {
+  if (!looksLikeFactoryForbidden(message.errorStatus, message.errorMessage)) {
+    return message;
+  }
+
+  return {
+    ...message,
+    errorMessage: factoryForbiddenDiagnostic({ ...args, originalMessage: message.errorMessage }),
+  };
+}
+
+function wrapThrownFactoryForbidden(error: unknown, args: FactoryDiagnosticArgs): unknown {
+  if (!(error instanceof Error) || !looksLikeFactoryForbidden(statusFromUnknownError(error), error.message)) {
+    return error;
+  }
+
+  return new Error(factoryForbiddenDiagnostic({ ...args, originalMessage: error.message }), { cause: error });
+}
+
+function routeWithFactoryDiagnostics(
+  inner: AssistantMessageEventStream,
+  args: FactoryDiagnosticArgs,
+): AssistantMessageEventStream {
+  const outer = new AssistantMessageEventStream();
+
+  void (async () => {
+    try {
+      for await (const event of inner) {
+        if (event.type === "error") {
+          outer.push({ ...event, error: enrichFactoryForbiddenError(event.error, args) });
+        } else {
+          outer.push(event);
+        }
+
+        if (outer.done) {
+          return;
+        }
+      }
+
+      if (!outer.done) {
+        outer.end(await inner.result());
+      }
+    } catch (error) {
+      outer.fail(wrapThrownFactoryForbidden(error, args));
+    }
+  })();
+
+  return outer;
+}
+
+function targetApiFor(modelId: string): FactoryTargetApi | null {
+  // MiniMax is a Droid Core (open) model, but Factory serves it through the
+  // Anthropic-compatible endpoint (observed in droid 0.153.1), not the OpenAI
+  // chat-completions endpoint used by the other open models.
+  if (modelId.startsWith("minimax-")) {
+    return "anthropic-messages";
+  }
+
+  switch (familyOf(modelId)) {
     case "anthropic":
       return "anthropic-messages";
     case "openai-responses":
@@ -126,17 +238,6 @@ function targetApiFor(modelId: string): FactoryTargetApi | null {
       return "openai-completions";
     case "unsupported":
       return null;
-  }
-}
-
-function proxyApiProviderFor(targetApi: FactoryTargetApi): string {
-  switch (targetApi) {
-    case "anthropic-messages":
-      return "anthropic";
-    case "openai-responses":
-      return "openai";
-    case "openai-completions":
-      return "factory";
   }
 }
 
@@ -151,7 +252,14 @@ function buildRequestHeaders(options: Parameters<NonNullable<ProviderConfig["str
   };
 }
 
-function foldSystemPromptForFactoryAnthropic(context: Context): Context {
+// Factory's gateway only accepts requests whose system field carries droid's
+// own system prompt (a client-attestation gate); any other system content —
+// `system` message, Anthropic top-level `system`, or OpenAI `instructions` —
+// is refused with `403 Forbidden`. Requests with NO system field are accepted.
+// So for every route we move OMP's system prompt out of the system channel and
+// into the first user message, leaving the system field empty. Observed against
+// the Factory gateway across all three routes (anthropic / responses / chat).
+function foldSystemPromptIntoUserMessage(context: Context): Context {
   const systemText = context.systemPrompt?.filter((part) => part.length > 0).join("\n\n");
 
   if (!systemText) {
@@ -197,7 +305,7 @@ function buildTargetModel(
 ): Model<FactoryTargetApi> {
   const isAnthropic = targetApi === "anthropic-messages";
   const baseUrl = isAnthropic ? `${apiEndpoint}/api/llm/a` : `${apiEndpoint}/api/llm/o/v1`;
-  const headers: Record<string, string> = { ...FACTORY_HEADERS, "x-api-provider": proxyApiProviderFor(targetApi) };
+  const headers: Record<string, string> = { ...FACTORY_HEADERS, "x-api-provider": upstreamProviderFor(model.id) };
 
   if (isAnthropic) {
     headers["anthropic-version"] = ANTHROPIC_VERSION;
@@ -248,9 +356,9 @@ export const factoryStreamSimple: NonNullable<ProviderConfig["streamSimple"]> = 
     const apiEndpoint = FACTORY_API_BASE_OVERRIDDEN ? FACTORY_API : credential.apiEndpoint ?? FACTORY_API;
     const target = buildTargetModel(model, targetApi, credential.orgId ?? FACTORY_ORG_ID, apiEndpoint);
 
-    const routedContext = targetApi === "anthropic-messages" ? foldSystemPromptForFactoryAnthropic(context) : context;
+    const routedContext = foldSystemPromptIntoUserMessage(context);
 
-    return streamSimple(target, routedContext, {
+    const inner = streamSimple(target, routedContext, {
       ...options,
       apiKey: credential.access,
       headers: {
@@ -258,6 +366,8 @@ export const factoryStreamSimple: NonNullable<ProviderConfig["streamSimple"]> = 
         ...(options?.headers ?? {}),
       },
     });
+
+    return routeWithFactoryDiagnostics(inner, { model, targetApi, credential, apiEndpoint });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 

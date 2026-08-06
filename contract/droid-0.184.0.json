@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-31T18:47:01.525Z",
+  "droidVersion": "0.184.0",
+  "routes": {
+    "chat": {
+      "method": "POST",
+      "path": "/api/llm/o/v1/chat/completions",
+      "headers": {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "user-agent": "factory-cli/0.184.0",
+        "x-api-provider": "fireworks",
+        "x-assistant-message-id": "<dynamic>",
+        "x-client-version": "0.184.0",
+        "x-factory-client": "cli",
+        "x-factory-org-id": "<configured>",
+        "x-session-id": "<dynamic>",
+        "x-stainless-arch": "<environment>",
+        "x-stainless-lang": "js",
+        "x-stainless-os": "<environment>",
+        "x-stainless-package-version": "6.25.0",
+        "x-stainless-retry-count": "0",
+        "x-stainless-runtime": "node",
+        "x-stainless-runtime-version": "<environment>"
+      },
+      "body": {
+        "model": "kimi-k2.6",
+        "messages": [
+          {
+            "role": "system",
+            "contentType": "string"
+          },
+          {
+            "role": "user",
+            "contentType": [
+              "text",
+              "text",
+              "text",
+              "text"
+            ]
+          },
+          {
+            "role": "user",
+            "contentType": "string"
+          }
+        ],
+        "tools": "array(16)",
+        "stream": true,
+        "max_tokens": 65536,
+        "temperature": 1,
+        "reasoning_effort": "high",
+        "reasoning_history": "preserved"
+      },
+      "toolsCount": 16,
+      "systemChannel": {
+        "field": "messages[role=system]",
+        "present": true,
+        "length": 3111,
+        "sha256": "14a604db2c6fa051e9713c3fe22b7a2bdc1751e430dc693b3d4e665716965c5f"
+      }
+    },
+    "messages": {
+      "method": "POST",
+      "path": "/api/llm/a/v1/messages",
+      "headers": {
+        "accept": "application/json",
+        "anthropic-beta": "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+        "user-agent": "factory-cli/0.184.0",
+        "x-api-provider": "anthropic",
+        "x-assistant-message-id": "<dynamic>",
+        "x-client-version": "0.184.0",
+        "x-factory-client": "cli",
+        "x-factory-org-id": "<configured>",
+        "x-session-id": "<dynamic>",
+        "x-stainless-arch": "<environment>",
+        "x-stainless-lang": "js",
+        "x-stainless-os": "<environment>",
+        "x-stainless-package-version": "0.70.1",
+        "x-stainless-retry-count": "0",
+        "x-stainless-runtime": "node",
+        "x-stainless-runtime-version": "<environment>",
+        "x-stainless-timeout": "600"
+      },
+      "body": {
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 32000,
+        "messages": [
+          {
+            "role": "user",
+            "contentType": [
+              "text",
+              "text",
+              "text",
+              "text"
+            ]
+          },
+          {
+            "role": "user",
+            "contentType": [
+              "text"
+            ]
+          }
+        ],
+        "tools": "array(16)",
+        "thinking": "<object keys=type|budget_tokens>",
+        "stream": true
+      },
+      "toolsCount": 16,
+      "systemChannel": {
+        "field": "system",
+        "present": true,
+        "length": 3110,
+        "sha256": "160bbfb24d6c3957a08b0ea87d5a31440221b74ab96834bb89a4dc555665c0b0",
+        "blockCount": 2
+      }
+    },
+    "responses": {
+      "method": "POST",
+      "path": "/api/llm/o/v1/responses",
+      "headers": {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "openai-platform": "org-bHuLtG1fGmYk5YaOihAAXFBw",
+        "user-agent": "factory-cli/0.184.0",
+        "x-api-provider": "openai",
+        "x-assistant-message-id": "<dynamic>",
+        "x-client-version": "0.184.0",
+        "x-factory-client": "cli",
+        "x-factory-org-id": "<configured>",
+        "x-session-id": "<dynamic>",
+        "x-stainless-arch": "<environment>",
+        "x-stainless-lang": "js",
+        "x-stainless-os": "<environment>",
+        "x-stainless-package-version": "6.25.0",
+        "x-stainless-retry-count": "0",
+        "x-stainless-runtime": "node",
+        "x-stainless-runtime-version": "<environment>"
+      },
+      "body": {
+        "model": "gpt-5.4-mini",
+        "input": [
+          {
+            "role": "user",
+            "contentType": [
+              "input_text",
+              "input_text",
+              "input_text",
+              "input_text"
+            ]
+          },
+          {
+            "role": "user",
+            "contentType": [
+              "input_text"
+            ]
+          }
+        ],
+        "store": false,
+        "tools": "array(15)",
+        "stream": true,
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "include": "<array(1) keys=0>",
+        "reasoning": "<object keys=effort|summary>",
+        "prompt_cache_key": "<dynamic>",
+        "prompt_cache_retention": "24h",
+        "text": "<object keys=verbosity>",
+        "safety_identifier": "<dynamic>"
+      },
+      "toolsCount": 15,
+      "systemChannel": {
+        "field": "instructions",
+        "present": true,
+        "length": 3279,
+        "sha256": "059a4ff759c05633ceeff0ce3d1f961e9338798b1ab6590ddb8febfe0ba056fd"
+      }
+    }
+  }
+}

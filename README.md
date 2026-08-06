@@ -2,7 +2,7 @@
 
 **Pi Provider Factory is an Oh My Pi provider extension for using Factory.ai Droid models from `omp`, including Claude Opus, Claude Sonnet, GPT, Codex, GLM, Kimi, DeepSeek, MiniMax, and Nemotron models through Factory's authenticated LLM gateway.**
 
-Last updated: 2026-06-23
+Last updated: 2026-07-30
 
 ## What this package does
 
@@ -18,7 +18,7 @@ Use it when you want:
 
 ## Supported models
 
-The extension ships a 25-model curated fallback catalog and refreshes Factory's public model docs for additional supported model IDs.
+The extension ships a 31-model curated static catalog, force-refreshes Factory's public model docs when an `omp` session starts, and merges any additional supported model IDs the docs list.
 
 ### Claude and Anthropic-family models
 
@@ -30,8 +30,10 @@ These models route through Factory's Anthropic-compatible gateway:
 - `claude-opus-4-7-fast`
 - `claude-opus-4-6`
 - `claude-opus-4-6-fast`
+- `claude-sonnet-5`
 - `claude-sonnet-4-6`
 - `claude-opus-4-5-20251101`
+- `claude-fable-5`
 - `claude-sonnet-4-5-20250929`
 - `claude-haiku-4-5-20251001`
 
@@ -56,8 +58,12 @@ These models route through Factory's OpenAI chat-completions-compatible gateway:
 - `glm-5.2`
 - `glm-5.1`
 - `kimi-k2.7-code`
+- `kimi-k2.6`
+- `kimi-k2.5`
 - `deepseek-v4-pro`
 - `minimax-m3`
+- `minimax-m2.7`
+- `minimax-m2.5`
 - `nemotron-3-ultra`
 
 ## Request routing
@@ -123,7 +129,7 @@ Force a fresh Factory catalog fetch at any time:
 omp models refresh factory
 ```
 
-This pulls Factory's public model docs for newly supported model IDs and falls back to the built-in catalog if Factory's docs endpoint is unavailable.
+This pulls Factory's public model docs for newly supported model IDs. If the docs fetch fails, the last successfully cached catalog is retained and the fetch is retried automatically — roughly every 5 minutes and at each session start.
 
 ## Authentication
 
@@ -157,6 +163,22 @@ When `FACTORY_API_KEY` is present, Oh My Pi treats it as the provider API key so
 unset FACTORY_API_KEY
 ```
 
+Billing-limit reporting (`/usage`) is OAuth-only; API-key sessions never query it (see below).
+
+## Usage reporting
+
+Native `/usage` reports Factory account quotas for OAuth accounts. The extension queries `GET {apiEndpoint}/api/billing/limits` with the OAuth bearer and Droid-compatible headers, and renders:
+
+- Standard 5-hour, weekly, and monthly windows
+- Droid Core 5-hour, weekly, and monthly windows — inactive pools are shown explicitly as having no active window instead of looking like available quota
+- Extra Usage balance as a remaining dollar amount, with eligibility and overage-preference notes
+
+Queries use the same base-URL precedence as model routing (`FACTORY_API_BASE`, then the OAuth credential's region-specific `apiEndpoint`, then `https://api.factory.ai`) and reuse Oh My Pi's normal usage cache window and history recording.
+
+The billing-limits endpoint is queried with OAuth credentials only. Factory `fk-...` API keys are intentionally never sent to it (a live probe returns `401`), so with only `FACTORY_API_KEY` configured, model calls still work but `/usage` shows no Factory billing limits by design.
+
+Usage-provider registration for extensions requires an Oh My Pi release that includes it; on older releases Factory simply does not appear in `/usage` while model routing is unaffected.
+
 ### Organization and region handling
 
 Factory's gateway requires an organization-scoped bearer token or an organization header. This extension derives the Factory organization ID from OAuth JWT claims or `/api/cli/whoami`, and it can recover WorkOS organization scope during refresh.
@@ -181,23 +203,23 @@ OAuth login and refresh support:
 
 ## Usage examples
 
-Run a Claude model through Factory:
+> **Note:** `omp -p --model factory/<id>` does not currently work from a cold start: omp resolves `--model` before extension-provider catalogs hydrate, so factory models are only selectable in interactive mode. Tracked upstream in [oh-my-pi#4216](https://github.com/can1357/oh-my-pi/issues/4216).
+
+Run a Factory model interactively:
 
 ```zsh
-omp -p --model factory/claude-opus-4-8 --no-tools "reply with the single word ok"
+omp
 ```
 
-Run a GPT model through Factory:
+Then select a model with the picker and prompt normally:
 
-```zsh
-omp -p --model factory/gpt-5.5 --no-tools "summarize this repo in one sentence"
+```text
+/model
+# filter for e.g. factory/claude-sonnet-5, Enter to select
+reply with the single word ok
 ```
 
-Run a Factory Core model:
-
-```zsh
-omp -p --model factory/glm-5.2 --no-tools "write a concise TypeScript function"
-```
+Any factory model works the same way, e.g. `factory/claude-opus-4-8`, `factory/gpt-5.5`, or `factory/glm-5.2`.
 
 ## Implementation notes
 
@@ -250,8 +272,10 @@ Most 403s are caused by one of these issues:
 1. `FACTORY_API_KEY` is set and overriding OAuth credentials.
 2. The OAuth token is not organization-scoped.
 3. The request is missing `X-Factory-Org-Id`.
-4. The Anthropic route sent a top-level `system` field.
+4. A non-droid system prompt was sent in the system field (Anthropic top-level `system`, OpenAI `instructions`, or a `system`-role message). Factory refuses non-droid system content on **every** route; the extension avoids this by folding the system prompt into the first user message.
 5. The wrong regional endpoint is being used.
+
+If `/api/cli/whoami` works but LLM calls still return `403 {"detail":"Forbidden",...}`, the credential is valid but Factory's LLM gateway is refusing that model/org request. Check Factory model entitlement for the org shown by the plugin diagnostic, then unset local overrides and re-login.
 
 Start with a clean OAuth run:
 
@@ -289,7 +313,23 @@ No. Requests go to Factory's gateway first. Factory then routes each request to 
 
 ### Which endpoint do Factory Core models use?
 
-Factory Core and open-weight chat models such as `glm-5.2`, `glm-5.1`, `kimi-k2.7-code`, and `deepseek-v4-pro` use `${apiEndpoint}/api/llm/o/v1/chat/completions`.
+Most Factory Core open-weight models — `glm-5.2`, `glm-5.1`, `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5`, `deepseek-v4-pro`, `nemotron-3-ultra` — use `${apiEndpoint}/api/llm/o/v1/chat/completions`. MiniMax models (`minimax-m3`, `minimax-m2.7`, `minimax-m2.5`) are the exception: Factory serves them through the Anthropic-compatible endpoint `${apiEndpoint}/api/llm/a/v1/messages`. Every Factory Core model sends `x-api-provider: fireworks`.
+
+### What `x-api-provider` value does each request send?
+
+Factory's gateway routes by the `x-api-provider` request header, which names the upstream and is independent of the API shape. Values are taken from observed `droid` CLI traffic:
+
+- `anthropic` — Claude models (Anthropic endpoint)
+- `openai` — GPT and Codex models (OpenAI Responses endpoint)
+- `fireworks` — all Droid Core open models (GLM, Kimi, DeepSeek, MiniMax, Nemotron), including MiniMax which is served over the Anthropic API shape
+
+Sending the wrong value (for example `factory` for an open model) makes the gateway reject the request with `400 {"detail":"Invalid x-api-provider header"}`.
+
+### How does the extension handle system prompts?
+
+Factory's gateway enforces a client-attestation gate: it only accepts a request whose system field carries droid's own system prompt as a prefix. Any other system content — an Anthropic top-level `system`, an OpenAI `instructions` string, or a `system`-role chat message — is refused with `403 {"detail":"Forbidden",...}` on every route. A request with no system field is always accepted.
+
+Because Oh My Pi sends its own system prompt (not droid's), the extension folds that prompt into the first user message — wrapped in `<system>…</system>` — and leaves the system field empty. This delivers the instructions to the model while satisfying the gate, and avoids bundling droid's proprietary prompt or injecting a conflicting "You are Droid" identity. The fold is applied on all three routes.
 
 ## Development
 
@@ -299,11 +339,12 @@ Run the TypeScript compiler:
 bunx tsc --noEmit
 ```
 
-Run a live smoke test after authenticating:
+Run a live smoke test after authenticating — use interactive mode ([oh-my-pi#4216](https://github.com/can1357/oh-my-pi/issues/4216) blocks `-p --model factory/...`):
 
 ```zsh
 unset FACTORY_API_KEY FACTORY_ORG_ID FACTORY_ORGANIZATION_ID FACTORY_API_BASE
-omp -p --model factory/claude-opus-4-8 --no-tools "reply with the single word ok"
+omp
+# /model → select factory/claude-opus-4-8 → prompt: reply with the single word ok
 ```
 
 Expected output:

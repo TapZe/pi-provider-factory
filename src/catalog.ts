@@ -85,6 +85,14 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     maxTokens: 64000,
   }),
   factoryModel({
+    id: "claude-sonnet-5",
+    name: "Claude Sonnet 5 (Factory)",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 1000000,
+    maxTokens: 128000,
+  }),
+  factoryModel({
     id: "claude-sonnet-4-6",
     name: "Claude Sonnet 4.6 (Factory)",
     reasoning: true,
@@ -99,6 +107,14 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     input: ["text", "image"],
     contextWindow: 200000,
     maxTokens: 64000,
+  }),
+  factoryModel({
+    id: "claude-fable-5",
+    name: "Claude Fable 5 (Factory)",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 867000,
+    maxTokens: 128000,
   }),
   factoryModel({
     id: "claude-sonnet-4-5-20250929",
@@ -193,48 +209,80 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GLM 5.2 (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 1000000,
-    maxTokens: 128000,
+    contextWindow: 1040000,
+    maxTokens: 131072,
   }),
   factoryModel({
     id: "glm-5.1",
     name: "GLM 5.1 (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 200000,
-    maxTokens: 32000,
+    contextWindow: 190000,
+    maxTokens: 131072,
   }),
   factoryModel({
     id: "kimi-k2.7-code",
     name: "Kimi K2.7 Code (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 200000,
-    maxTokens: 32000,
+    contextWindow: 262144,
+    maxTokens: 65536,
+  }),
+  factoryModel({
+    id: "kimi-k2.6",
+    name: "Kimi K2.6 (Factory Core)",
+    reasoning: true,
+    input: ["text"],
+    contextWindow: 262144,
+    maxTokens: 65536,
+  }),
+  factoryModel({
+    id: "kimi-k2.5",
+    name: "Kimi K2.5 (Factory Core)",
+    reasoning: true,
+    input: ["text"],
+    contextWindow: 256000,
+    maxTokens: 32768,
   }),
   factoryModel({
     id: "deepseek-v4-pro",
     name: "DeepSeek V4 Pro (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 200000,
-    maxTokens: 32000,
+    contextWindow: 1048576,
+    maxTokens: 65536,
   }),
   factoryModel({
     id: "minimax-m3",
     name: "MiniMax M3 (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 200000,
-    maxTokens: 32000,
+    contextWindow: 512000,
+    maxTokens: 64000,
+  }),
+  factoryModel({
+    id: "minimax-m2.7",
+    name: "MiniMax M2.7 (Factory Core)",
+    reasoning: true,
+    input: ["text"],
+    contextWindow: 196600,
+    maxTokens: 64000,
+  }),
+  factoryModel({
+    id: "minimax-m2.5",
+    name: "MiniMax M2.5 (Factory Core)",
+    reasoning: true,
+    input: ["text"],
+    contextWindow: 204800,
+    maxTokens: 64000,
   }),
   factoryModel({
     id: "nemotron-3-ultra",
     name: "Nemotron 3 Ultra (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 200000,
-    maxTokens: 32000,
+    contextWindow: 262144,
+    maxTokens: 65536,
   }),
 ];
 
@@ -258,4 +306,23 @@ export function familyOf(id: string): FactoryModelFamily {
   }
 
   return "unsupported";
+}
+
+export type FactoryUpstreamProvider = "anthropic" | "openai" | "fireworks";
+
+// Factory's `x-api-provider` request header names the UPSTREAM the gateway routes
+// to, independent of the wire API shape. Droid Core open models (GLM, Kimi,
+// DeepSeek, MiniMax, Nemotron) all resolve to "fireworks" — even MiniMax, which
+// is served over the Anthropic-compatible API. Observed from droid 0.153.1
+// traffic; grouping confirmed by https://docs.factory.ai/models.
+export function upstreamProviderFor(id: string): FactoryUpstreamProvider {
+  if (id.startsWith("claude-")) {
+    return "anthropic";
+  }
+
+  if (id.startsWith("gpt-") || id.endsWith("-codex")) {
+    return "openai";
+  }
+
+  return "fireworks";
 }

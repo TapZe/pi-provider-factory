@@ -2,14 +2,18 @@
   "compilerOptions": {
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "target": "ES2022",
+    "target": "ES2024",
+    "lib": ["ES2024"],
     "strict": true,
     "types": [
-      "node"
+      "node",
+      "bun"
     ],
     "skipLibCheck": true
   },
   "include": [
-    "src"
+    "src",
+    "e2e",
+    "tools"
   ]
 }

@@ -4,30 +4,11 @@ import { FACTORY_MODELS, factoryModel, familyOf } from "./catalog";
 
 const FACTORY_MODEL_DOCS_URL = "https://docs.factory.ai/models.md";
 
-export type FactoryModelDocsSection = "anthropic" | "openai" | "core";
-
 export type FactoryModelDocsEntry = {
   id: string;
   displayName: string;
-  section: FactoryModelDocsSection;
   reasoning: string;
 };
-
-function sectionForHeading(line: string): FactoryModelDocsSection | null {
-  if (line.includes(">Anthropic</span>")) {
-    return "anthropic";
-  }
-
-  if (line.includes(">OpenAI</span>")) {
-    return "openai";
-  }
-
-  if (line.includes(">Droid Core (Open Models)</span>")) {
-    return "core";
-  }
-
-  return null;
-}
 
 function stripDocsMarkup(value: string): string {
   return value
@@ -37,19 +18,17 @@ function stripDocsMarkup(value: string): string {
     .trim();
 }
 
+// Section-independent: the model ID's family is the only gate. Any table row
+// with a backticked ID whose family we can route is kept, no matter which
+// heading it appears under and no matter what footnote glyphs decorate it —
+// new or renamed docs sections must never silently drop models.
 export function parseFactoryModelDocs(markdown: string): FactoryModelDocsEntry[] {
   const entries: FactoryModelDocsEntry[] = [];
-  let section: FactoryModelDocsSection | null = null;
 
   for (const rawLine of markdown.split("\n")) {
     const line = rawLine.trim();
 
-    if (line.startsWith("## ")) {
-      section = sectionForHeading(line);
-      continue;
-    }
-
-    if (section === null || !line.startsWith("|")) {
+    if (!line.startsWith("|")) {
       continue;
     }
 
@@ -58,21 +37,22 @@ export function parseFactoryModelDocs(markdown: string): FactoryModelDocsEntry[]
       continue;
     }
 
-    const displayCell = cells[1] ?? "";
+    // Header/separator rows have no backticked ID, so this skips them too.
     const idMatch = (cells[2] ?? "").match(/`([^`]+)`/);
     if (!idMatch) {
       continue;
     }
 
     const id = idMatch[1].trim();
-    if (id.length === 0 || displayCell.includes("\u2020") || familyOf(id) === "unsupported") {
+    if (id.length === 0 || familyOf(id) === "unsupported") {
       continue;
     }
 
+    const displayName = stripDocsMarkup(cells[1] ?? "").replace(/[\s*†‡§]+$/u, "");
+
     entries.push({
       id,
-      displayName: stripDocsMarkup(displayCell),
-      section,
+      displayName: displayName.length > 0 ? displayName : id,
       reasoning: cells[4] ?? "",
     });
   }
@@ -135,32 +115,25 @@ function mergeDocsModels(entries: FactoryModelDocsEntry[]): ProviderModelConfig[
   return merged;
 }
 
+// Throws on any fetch/parse failure. pi-catalog catches the error, keeps the
+// last-good cached catalog non-authoritatively, and retries in 5 minutes —
+// strictly better than returning the static fallback, which would be recorded
+// as a successful authoritative fetch and drop every docs-only model for 24 h.
 export async function fetchFactoryDynamicModels(_apiKey?: string): Promise<readonly ProviderModelConfig[]> {
-  let markdown: string;
+  const response = await fetch(FACTORY_MODEL_DOCS_URL, {
+    headers: { Accept: "text/markdown,text/plain;q=0.9,*/*;q=0.1" },
+  });
 
-  try {
-    const response = await fetch(FACTORY_MODEL_DOCS_URL, {
-      headers: { Accept: "text/markdown,text/plain;q=0.9,*/*;q=0.1" },
-    });
-
-    if (!response.ok) {
-      return FACTORY_MODELS;
-    }
-
-    markdown = await response.text();
-  } catch {
-    return FACTORY_MODELS;
+  if (!response.ok) {
+    throw new Error(`factory: model docs fetch failed: HTTP ${response.status}`);
   }
+
+  const markdown = await response.text();
 
   const entries = parseFactoryModelDocs(markdown);
   if (entries.length === 0) {
-    return FACTORY_MODELS;
+    throw new Error("factory: model docs parsed to zero entries — docs format changed?");
   }
 
-  const merged = mergeDocsModels(entries);
-  if (merged.length === 0) {
-    return FACTORY_MODELS;
-  }
-
-  return merged;
+  return mergeDocsModels(entries);
 }
