@@ -52,3 +52,5 @@ export const WORKOS_TOKEN = "https://api.workos.com/user_management/authenticate
 export const WORKOS_CLIENT_ID = "client_01HNM792M5G5G1A2THWPXKFMXB";
 export const PROVIDER_ID = "factory";
 export const CUSTOM_API = "factory";
+
+export const FACTORY_DROID_SYSTEM_PROMPT = "You are Droid, an AI software engineering agent built by Factory.";

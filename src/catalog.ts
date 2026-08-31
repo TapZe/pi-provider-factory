@@ -15,7 +15,67 @@ export type FactoryModelInput = {
   input: ProviderModelConfig["input"];
   contextWindow: number;
   maxTokens: number;
+  cost?: ProviderModelConfig["cost"];
 };
+
+export function defaultCostFor(id: string): ProviderModelConfig["cost"] {
+  // Claude family
+  if (id.startsWith("claude-opus-")) {
+    return { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 };
+  }
+  if (id.startsWith("claude-sonnet-") || id.startsWith("claude-fable-")) {
+    return { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 };
+  }
+  if (id.startsWith("claude-haiku-")) {
+    return { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1.0 };
+  }
+
+  // GPT family
+  if (id === "gpt-5.6-sol" || id.startsWith("gpt-5.6-sol-")) {
+    return { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 };
+  }
+  if (id === "gpt-5.6-terra" || id.startsWith("gpt-5.6-terra-")) {
+    return { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.5 };
+  }
+  if (id === "gpt-5.6-luna" || id.startsWith("gpt-5.6-luna-")) {
+    return { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 };
+  }
+  if (id.startsWith("gpt-5.5-pro")) {
+    return { input: 10, output: 40, cacheRead: 1.0, cacheWrite: 12.5 };
+  }
+  if (id.startsWith("gpt-5.5")) {
+    return { input: 5, output: 20, cacheRead: 0.5, cacheWrite: 6.25 };
+  }
+  if (id.startsWith("gpt-5.4-mini")) {
+    return { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0.1875 };
+  }
+  if (id.startsWith("gpt-5.4") || id.startsWith("gpt-5.3-codex") || id.startsWith("gpt-5.2")) {
+    return { input: 2.5, output: 10, cacheRead: 0.25, cacheWrite: 3.125 };
+  }
+
+  // Core Open Models (Fireworks / Standard host rates)
+  if (id.startsWith("deepseek-v4-flash")) {
+    return { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0 };
+  }
+  if (id.startsWith("deepseek-v4-pro") || id.startsWith("deepseek-")) {
+    return { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0 };
+  }
+  if (id.startsWith("glm-")) {
+    return { input: 0.4, output: 1.0, cacheRead: 0.04, cacheWrite: 0 };
+  }
+  if (id.startsWith("kimi-")) {
+    return { input: 0.4, output: 1.2, cacheRead: 0.04, cacheWrite: 0 };
+  }
+  if (id.startsWith("minimax-")) {
+    return { input: 0.2, output: 0.8, cacheRead: 0.02, cacheWrite: 0 };
+  }
+  if (id.startsWith("nemotron-")) {
+    return { input: 0.4, output: 1.0, cacheRead: 0.04, cacheWrite: 0 };
+  }
+
+  // Default fallback
+  return { input: 1.0, output: 3.0, cacheRead: 0.1, cacheWrite: 0 };
+}
 
 export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
   return {
@@ -24,12 +84,7 @@ export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
     api: CUSTOM_API,
     reasoning: config.reasoning,
     input: config.input,
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-    },
+    cost: config.cost ?? defaultCostFor(config.id),
     contextWindow: config.contextWindow,
     maxTokens: config.maxTokens,
   };

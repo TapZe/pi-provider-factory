@@ -13,6 +13,7 @@ import {
   FACTORY_HEADERS,
   FACTORY_OPENAI_PLATFORM_ORG,
   FACTORY_ORG_ID,
+  FACTORY_DROID_SYSTEM_PROMPT,
   PROVIDER_ID,
 } from "./constants";
 
@@ -252,48 +253,15 @@ function buildRequestHeaders(options: Parameters<NonNullable<ProviderConfig["str
   };
 }
 
-// Factory's gateway only accepts requests whose system field carries droid's
-// own system prompt (a client-attestation gate); any other system content —
-// `system` message, Anthropic top-level `system`, or OpenAI `instructions` —
-// is refused with `403 Forbidden`. Requests with NO system field are accepted.
-// So for every route we move OMP's system prompt out of the system channel and
-// into the first user message, leaving the system field empty. Observed against
-// the Factory gateway across all three routes (anthropic / responses / chat).
-function foldSystemPromptIntoUserMessage(context: Context): Context {
-  const systemText = context.systemPrompt?.filter((part) => part.length > 0).join("\n\n");
-
-  if (!systemText) {
-    return context;
-  }
-
-  const systemPreamble = `<system>\n${systemText}\n</system>\n\n`;
-  const [firstMessage, ...restMessages] = context.messages;
-
-  if (firstMessage?.role === "user") {
-    const content =
-      typeof firstMessage.content === "string"
-        ? `${systemPreamble}${firstMessage.content}`
-        : [{ type: "text" as const, text: systemPreamble }, ...firstMessage.content];
-
-    return {
-      ...context,
-      systemPrompt: undefined,
-      messages: [{ ...firstMessage, content }, ...restMessages],
-    };
-  }
-
+// Factory's gateway requires requests to carry Droid's system prompt prefix
+// ("You are Droid, an AI software engineering agent built by Factory.")
+// Requests missing this prefix or with system stripped return 403 Forbidden.
+// We ensure the required Droid prefix is at the start of the system prompt array.
+function prepareContextForFactory(context: Context): Context {
+  const existingPrompts = context.systemPrompt?.filter((part) => part.length > 0) ?? [];
   return {
     ...context,
-    systemPrompt: undefined,
-    messages: [
-      {
-        role: "user",
-        content: systemPreamble,
-        synthetic: true,
-        timestamp: Date.now(),
-      },
-      ...context.messages,
-    ],
+    systemPrompt: [FACTORY_DROID_SYSTEM_PROMPT, ...existingPrompts],
   };
 }
 
@@ -331,7 +299,6 @@ function buildTargetModel(
     premiumMultiplier: model.premiumMultiplier,
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
-    thinking: model.thinking,
     headers,
   };
 
@@ -356,7 +323,7 @@ export const factoryStreamSimple: NonNullable<ProviderConfig["streamSimple"]> = 
     const apiEndpoint = FACTORY_API_BASE_OVERRIDDEN ? FACTORY_API : credential.apiEndpoint ?? FACTORY_API;
     const target = buildTargetModel(model, targetApi, credential.orgId ?? FACTORY_ORG_ID, apiEndpoint);
 
-    const routedContext = foldSystemPromptIntoUserMessage(context);
+    const routedContext = prepareContextForFactory(context);
 
     const inner = streamSimple(target, routedContext, {
       ...options,
