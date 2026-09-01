@@ -90,3 +90,27 @@ describe("fetchFactoryDynamicModels failure paths", () => {
     await expect(fetchFactoryDynamicModels()).rejects.toThrow(/zero entries/);
   });
 });
+
+describe("matchLivePrice", () => {
+  const { matchLivePrice } = require("./model-refresh");
+  const liveMap = new Map([
+    ["anthropic/claude-opus-5", { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 0 }],
+    ["moonshotai/kimi-k3", { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 }],
+  ]);
+
+  test("matches direct and prefixed model IDs from live OpenRouter map", () => {
+    const opus = matchLivePrice("claude-opus-5", liveMap);
+    expect(opus).toBeDefined();
+    expect(opus.input).toBe(5);
+    expect(opus.output).toBe(25);
+
+    const kimi = matchLivePrice("kimi-k3", liveMap);
+    expect(kimi).toBeDefined();
+    expect(kimi.input).toBe(3);
+    expect(kimi.output).toBe(15);
+  });
+
+  test("returns undefined when no match found in live map", () => {
+    expect(matchLivePrice("unknown-model", liveMap)).toBeUndefined();
+  });
+});
