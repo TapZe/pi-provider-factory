@@ -557,7 +557,7 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
 ];
 
 export function familyOf(id: string): FactoryModelFamily {
-  if (id.startsWith("claude-")) {
+  if (id.startsWith("claude-") || id.startsWith("minimax-") || id.startsWith("atlas-") || id.startsWith("aster-")) {
     return "anthropic";
   }
 
@@ -569,8 +569,8 @@ export function familyOf(id: string): FactoryModelFamily {
     id.startsWith("glm-") ||
     id.startsWith("kimi-") ||
     id.startsWith("deepseek-") ||
-    id.startsWith("minimax-") ||
     id.startsWith("nemotron-") ||
+    id.startsWith("grok-") ||
     id === "inkling" ||
     id.startsWith("inkling-")
   ) {
@@ -580,20 +580,23 @@ export function familyOf(id: string): FactoryModelFamily {
   return "unsupported";
 }
 
-export type FactoryUpstreamProvider = "anthropic" | "openai" | "fireworks";
+export type FactoryUpstreamProvider = "anthropic" | "openai" | "fireworks" | "xai";
 
 // Factory's `x-api-provider` request header names the UPSTREAM the gateway routes
 // to, independent of the wire API shape. Droid Core open models (GLM, Kimi,
 // DeepSeek, MiniMax, Nemotron, Inkling) all resolve to "fireworks" — even MiniMax,
-// which is served over the Anthropic-compatible API. Observed from droid traffic;
-// grouping confirmed by https://docs.factory.ai/models.
+// which is served over the Anthropic-compatible API.
 export function upstreamProviderFor(id: string): FactoryUpstreamProvider {
-  if (id.startsWith("claude-")) {
+  if (id.startsWith("claude-") || id.startsWith("atlas-") || id.startsWith("aster-")) {
     return "anthropic";
   }
 
   if (id.startsWith("gpt-") || id.endsWith("-codex")) {
     return "openai";
+  }
+
+  if (id.startsWith("grok-")) {
+    return "xai";
   }
 
   return "fireworks";
