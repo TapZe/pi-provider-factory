@@ -13,9 +13,10 @@ describe("Factory Router & Tool Execution Configuration", () => {
   });
 
   it("contains the Droid system prompt prefix enforcing tool usage", () => {
-    expect(FACTORY_DROID_SYSTEM_PROMPT).toBe(
+    expect(FACTORY_DROID_SYSTEM_PROMPT).toStartWith(
       "You are Droid, an AI software engineering agent built by Factory.",
     );
+    expect(FACTORY_DROID_SYSTEM_PROMPT).toContain("EXECUTION DIRECTIVES");
   });
 
   it("prepends Droid system prompt prefix while preserving tools and messages", () => {
