@@ -265,10 +265,14 @@ const DROID_TOOL_NAME_MAP: Record<string, string> = {
   bash: "Execute",
   execute_bash: "Execute",
   exec: "Execute",
+  search: "Grep",
   grep: "Grep",
   grep_search: "Grep",
   find: "Find",
   find_files: "Find",
+  web_search: "WebSearch",
+  todo: "Todo",
+  ask: "Ask",
 };
 
 // Factory's gateway requires requests to carry Droid's system prompt prefix
