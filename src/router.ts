@@ -7,6 +7,7 @@ import { streamSimple, type AssistantMessage, type Context } from "@oh-my-pi/pi-
 
 import { familyOf, upstreamProviderFor } from "./catalog";
 import {
+  ANTHROPIC_BETAS,
   ANTHROPIC_VERSION,
   FACTORY_API,
   FACTORY_API_BASE_OVERRIDDEN,
@@ -259,9 +260,13 @@ function buildRequestHeaders(options: Parameters<NonNullable<ProviderConfig["str
 // We ensure the required Droid prefix is at the start of the system prompt array.
 function prepareContextForFactory(context: Context): Context {
   const existingPrompts = context.systemPrompt?.filter((part) => part.length > 0) ?? [];
+  const alreadyHasDroidPrefix = existingPrompts.some((p) =>
+    p.includes("You are Droid, an AI software engineering agent built by Factory"),
+  );
+
   return {
     ...context,
-    systemPrompt: [FACTORY_DROID_SYSTEM_PROMPT, ...existingPrompts],
+    systemPrompt: alreadyHasDroidPrefix ? existingPrompts : [FACTORY_DROID_SYSTEM_PROMPT, ...existingPrompts],
   };
 }
 
@@ -277,6 +282,7 @@ function buildTargetModel(
 
   if (isAnthropic) {
     headers["anthropic-version"] = ANTHROPIC_VERSION;
+    headers["anthropic-beta"] = ANTHROPIC_BETAS;
   }
 
   if (targetApi === "openai-responses") {
@@ -324,9 +330,12 @@ export const factoryStreamSimple: NonNullable<ProviderConfig["streamSimple"]> = 
     const target = buildTargetModel(model, targetApi, credential.orgId ?? FACTORY_ORG_ID, apiEndpoint);
 
     const routedContext = prepareContextForFactory(context);
+    const hasTools = (routedContext.tools && routedContext.tools.length > 0) ?? false;
+    const resolvedToolChoice = options?.toolChoice ?? (hasTools ? "auto" : undefined);
 
     const inner = streamSimple(target, routedContext, {
       ...options,
+      toolChoice: resolvedToolChoice,
       apiKey: credential.access,
       headers: {
         ...buildRequestHeaders(options),
