@@ -12,6 +12,7 @@ export type FactoryModelInput = {
   id: string;
   name: string;
   reasoning: boolean;
+  thinking?: ProviderModelConfig["thinking"];
   input: ProviderModelConfig["input"];
   contextWindow: number;
   maxTokens: number;
@@ -123,12 +124,35 @@ export function defaultCostFor(id: string): ProviderModelConfig["cost"] {
   return { input: 1.0, output: 3.0, cacheRead: 0.1, cacheWrite: 0 };
 }
 
+const FACTORY_DEFAULT_EFFORTS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as unknown as NonNullable<ProviderModelConfig["thinking"]>["efforts"];
+
+const FACTORY_DEFAULT_EFFORT_MAP = {
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "high",
+} as unknown as NonNullable<ProviderModelConfig["thinking"]>["effortMap"];
+
 export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
   return {
     id: config.id,
     name: config.name,
     api: CUSTOM_API,
     reasoning: config.reasoning,
+    thinking: config.reasoning
+      ? (config.thinking ?? {
+          mode: "effort",
+          efforts: FACTORY_DEFAULT_EFFORTS,
+          effortMap: FACTORY_DEFAULT_EFFORT_MAP,
+        })
+      : undefined,
     input: config.input,
     cost: config.cost ?? defaultCostFor(config.id),
     premiumMultiplier: config.premiumMultiplier,

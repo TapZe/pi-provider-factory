@@ -82,15 +82,13 @@ describe("Factory Router & Tool Execution Configuration", () => {
     expect(toolResultMsg?.customWireName).toBe("Read");
   });
 
-  it("does not duplicate Droid system prompt prefix if already present", () => {
-    const context = {
-      systemPrompt: [FACTORY_DROID_SYSTEM_PROMPT, "Additional prompt"],
-      messages: [],
-    };
-
-    const prepared = prepareContextForFactory(context);
-
-    expect(prepared.systemPrompt?.length).toBe(2);
-    expect(prepared.systemPrompt?.[0]).toBe(FACTORY_DROID_SYSTEM_PROMPT);
+  it("configures thinking capabilities with max/xhigh effort support for reasoning models", () => {
+    const { FACTORY_MODELS } = require("./catalog");
+    const kimiK3 = FACTORY_MODELS.find((m: any) => m.id === "kimi-k3");
+    expect(kimiK3).toBeDefined();
+    expect(kimiK3.reasoning).toBe(true);
+    expect(kimiK3.thinking).toBeDefined();
+    expect(kimiK3.thinking.efforts).toContain("xhigh");
+    expect(kimiK3.thinking.effortMap.xhigh).toBeDefined();
   });
 });

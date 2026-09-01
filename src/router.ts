@@ -521,6 +521,7 @@ function buildTargetModel(
     api: targetApi,
     baseUrl,
     reasoning: model.reasoning,
+    thinking: model.thinking,
     input: model.input,
     cost: model.cost,
     premiumMultiplier: model.premiumMultiplier,
