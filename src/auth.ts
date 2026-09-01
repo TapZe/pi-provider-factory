@@ -504,30 +504,7 @@ async function loginWithBrowser(callbacks: OAuthLoginCallbacks): Promise<OAuthCr
   }
 }
 
-export async function login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials | string> {
-  const pasted = await callbacks.onPrompt({
-    message: "Paste a Factory API key (fk-…) to use a key, or leave blank to log in with your browser",
-    placeholder: "fk-...",
-    allowEmpty: true,
-  });
-  const trimmed = pasted.trim();
-
-  if (trimmed.startsWith("fk-")) {
-    return trimmed;
-  }
-
-  if (trimmed.length > 0) {
-    const retry = await callbacks.onPrompt({
-      message:
-        "That value does not start with fk-. Paste a Factory API key again, or leave blank to use the previous value as a raw bearer token.",
-      placeholder: "fk-...",
-      allowEmpty: true,
-    });
-    const retryTrimmed = retry.trim();
-
-    return retryTrimmed || trimmed;
-  }
-
+export async function login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
   return loginWithBrowser(callbacks);
 }
 

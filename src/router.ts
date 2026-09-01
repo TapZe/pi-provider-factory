@@ -254,18 +254,48 @@ function buildRequestHeaders(options: Parameters<NonNullable<ProviderConfig["str
   };
 }
 
+const DROID_TOOL_NAME_MAP: Record<string, string> = {
+  read: "Read",
+  read_file: "Read",
+  view_file: "Read",
+  edit: "Edit",
+  edit_file: "Edit",
+  write: "Create",
+  write_file: "Create",
+  bash: "Execute",
+  execute_bash: "Execute",
+  exec: "Execute",
+  grep: "Grep",
+  grep_search: "Grep",
+  find: "Find",
+  find_files: "Find",
+};
+
 // Factory's gateway requires requests to carry Droid's system prompt prefix
 // ("You are Droid, an AI software engineering agent built by Factory.")
 // Requests missing this prefix or with system stripped return 403 Forbidden.
-// We ensure the required Droid prefix is at the start of the system prompt array.
-function prepareContextForFactory(context: Context): Context {
+// We ensure the required Droid prefix is at the start of the system prompt array,
+// and tools are aliased to Droid's fine-tuned PascalCase names on the wire.
+export function prepareContextForFactory(context: Context): Context {
   const existingPrompts = context.systemPrompt?.filter((part) => part.length > 0) ?? [];
   const alreadyHasDroidPrefix = existingPrompts.some((p) =>
     p.includes("You are Droid, an AI software engineering agent built by Factory"),
   );
 
+  const tools = context.tools?.map((tool) => {
+    const droidName = DROID_TOOL_NAME_MAP[tool.name.toLowerCase()];
+    if (droidName && !tool.customWireName) {
+      return {
+        ...tool,
+        customWireName: droidName,
+      };
+    }
+    return tool;
+  });
+
   return {
     ...context,
+    tools,
     systemPrompt: alreadyHasDroidPrefix ? existingPrompts : [FACTORY_DROID_SYSTEM_PROMPT, ...existingPrompts],
   };
 }
