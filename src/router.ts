@@ -312,7 +312,7 @@ function buildTargetModel(
     targetApi === "openai-completions"
       ? {
           extraBody: {
-            reasoning_history: "preserved",
+            reasoning_history: isDeepseek ? "interleaved" : "preserved",
           },
           streamMarkupHealingPattern: markupPattern,
           stripDeepseekSpecialTokens: isDeepseek,

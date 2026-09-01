@@ -1,6 +1,6 @@
 # Pi Provider Factory
 
-**Pi Provider Factory is an Oh My Pi (`omp`) provider extension for accessing Factory.ai Droid models, including Claude Opus, Claude Sonnet, GPT, Codex, GLM, Kimi, DeepSeek, MiniMax, Grok, and Nemotron through Factory's authenticated LLM gateway.**
+**Pi Provider Factory is an Oh My Pi (`omp`) provider extension for accessing Factory.ai Droid models, including Claude Opus, Claude Sonnet, GPT, Codex, GLM, Kimi, DeepSeek, MiniMax, and Nemotron through Factory's authenticated LLM gateway.**
 
 Last updated: 2026-09-01
 
@@ -10,11 +10,11 @@ This package registers a custom `factory` provider for [Oh My Pi](https://www.np
 
 Key features:
 
-- **Full Model Portfolio**: Access Claude Opus 5, GPT-5.6 Sol/Luna/Terra, GLM-5.3, Kimi K3, DeepSeek V4 Pro, MiniMax M3, and Grok 4.6 inside `omp`.
+- **Full Model Portfolio**: Access Claude Opus 5, GPT-5.6 Sol/Luna/Terra, GLM-5.3, Kimi K3, DeepSeek V4 Pro, and MiniMax M3 inside `omp`.
 - **Droid-Compatible OAuth**: Device login at `https://auth.factory.ai/device` with WorkOS token refresh and automatic organization derivation (`X-Factory-Org-Id`).
 - **Tri-Gateway Wire Routing**: Accurately routes to Factory's Anthropic (`/api/llm/a`), OpenAI Responses (`/api/llm/o/v1/responses`), and Fireworks (`/api/llm/o/v1/chat/completions`) endpoints.
 - **Native Tool Normalization & Wire Healing**: Converts tool calls and message history into Droid PascalCase primitives (`Read`, `Execute`, `Grep`, `Glob`, `LS`), and uses real-time stream markup healing to parse in-band reasoning and XML tool calls cleanly.
-- **Reasoning & Adaptive Thinking**: Supports Anthropic adaptive thinking for Claude Opus/Fable 5, effort ladders (`minimal` to `max`/`xhigh`), and preserves reasoning history across multi-turn tool loops for Fireworks-hosted models.
+- **Reasoning & Adaptive Thinking**: Supports Anthropic adaptive thinking for Claude Opus/Fable 5, effort ladders (`minimal` to `max`/`xhigh`), and preserves reasoning history across multi-turn tool loops for Fireworks-hosted models (`interleaved` for DeepSeek, `preserved` for GLM/Kimi).
 - **Real-Time Quota Tracking**: Query live billing limits and credit balances with `/usage`.
 
 ---
@@ -45,7 +45,8 @@ The extension ships a curated static catalog and automatically checks Factory's 
 - **GLM**: `glm-5.3`, `glm-5.3-flash`, `glm-5.2`, `glm-5.2-fast`, `glm-5.1`, `glm-5`, `glm-4.7`, `glm-4.6` (`x-api-provider: fireworks`)
 - **DeepSeek**: `deepseek-v4-pro`, `deepseek-v4-flash-0731` (`x-api-provider: fireworks`)
 - **Nemotron / Inkling**: `nemotron-3-ultra`, `inkling` (`x-api-provider: fireworks`)
-- **Grok**: `grok-4.6`, `grok-4.5` (`x-api-provider: xai`)
+
+*(Note: Grok is a premium direct-xAI model in Droid, not a Droid Core model served via Factory's chat completions gateway).*
 
 ---
 
@@ -96,8 +97,7 @@ Factory model requests are directed to Factory's LLM gateway (`https://api.facto
 | **Claude** | `POST /api/llm/a/v1/messages` | `x-api-provider: anthropic` | `anthropic-version: 2023-06-01`<br>`anthropic-beta: interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14`<br>Adaptive thinking (`type: "adaptive"`) |
 | **MiniMax** | `POST /api/llm/a/v1/messages` | `x-api-provider: fireworks` | Served over Anthropic Messages protocol |
 | **GPT / Codex** | `POST /api/llm/o/v1/responses` | `x-api-provider: openai` | `OpenAI-Platform: org-bHuLtG1fGmYk5YaOihAAXFBw`<br>PascalCase tools (`Read`, `Execute`, `Grep`, `Glob`, `LS`) |
-| **Kimi / GLM / DeepSeek** | `POST /api/llm/o/v1/chat/completions` | `x-api-provider: fireworks` | `reasoning_history: "preserved"`<br>Stream markup healing (`thinking` / `kimi`)<br>Assistant reasoning signature replay |
-| **Grok** | `POST /api/llm/o/v1/chat/completions` | `x-api-provider: xai` | `reasoning_history: "preserved"` |
+| **Kimi / GLM / DeepSeek** | `POST /api/llm/o/v1/chat/completions` | `x-api-provider: fireworks` | `reasoning_history: "preserved"` (`"interleaved"` for DeepSeek)<br>Stream markup healing (`thinking` / `kimi` / `dsml`)<br>Assistant reasoning signature replay |
 
 ```text
 /login factory
@@ -271,7 +271,7 @@ No. Requests go to Factory's gateway first. Factory then routes each request to 
 
 ### Which endpoint do Factory Core models use?
 
-Most Factory Core open-weight models — `glm-5.3`, `kimi-k3`, `deepseek-v4-pro`, `nemotron-3-ultra`, `inkling` — use `${apiEndpoint}/api/llm/o/v1/chat/completions` with `reasoning_history: "preserved"` and `x-api-provider: fireworks` (or `x-api-provider: xai` for Grok). MiniMax models (`minimax-m3`, `minimax-m2.7`, `minimax-m2.5`) are served through the Anthropic-compatible endpoint `${apiEndpoint}/api/llm/a/v1/messages` with `x-api-provider: fireworks`.
+Factory Core chat-completions models — `glm-5.3`, `kimi-k3`, `deepseek-v4-pro`, `nemotron-3-ultra`, and `inkling` — use `${apiEndpoint}/api/llm/o/v1/chat/completions` with `reasoning_history` (`"interleaved"` for DeepSeek, `"preserved"` for GLM/Kimi) and `x-api-provider: fireworks`. MiniMax models (`minimax-m3`, `minimax-m2.7`, `minimax-m2.5`) are served through the Anthropic-compatible endpoint `${apiEndpoint}/api/llm/a/v1/messages` with `x-api-provider: fireworks`. (Note: Grok is a premium direct-xAI model in Droid, not a Droid Core model).
 
 ### What `x-api-provider` value does each request send?
 
@@ -279,8 +279,7 @@ Factory's gateway routes by the `x-api-provider` request header, which names the
 
 - `anthropic` — Claude models (Anthropic endpoint)
 - `openai` — GPT and Codex models (OpenAI Responses endpoint)
-- `fireworks` — Droid Core open models (GLM, Kimi, DeepSeek, MiniMax, Nemotron, Inkling)
-- `xai` — Grok models
+- `fireworks` — Factory Core models (GLM, Kimi, DeepSeek, MiniMax, Nemotron, Inkling)
 
 ## Development
 
