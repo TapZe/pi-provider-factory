@@ -1,153 +1,103 @@
 # Pi Provider Factory
 
-**Pi Provider Factory is an Oh My Pi provider extension for using Factory.ai Droid models from `omp`, including Claude Opus, Claude Sonnet, GPT, Codex, GLM, Kimi, DeepSeek, MiniMax, and Nemotron models through Factory's authenticated LLM gateway.**
+**Pi Provider Factory is an Oh My Pi (`omp`) provider extension for accessing Factory.ai Droid models, including Claude Opus, Claude Sonnet, GPT, Codex, GLM, Kimi, DeepSeek, MiniMax, Grok, and Nemotron through Factory's authenticated LLM gateway.**
 
-Last updated: 2026-07-30
+Last updated: 2026-09-01
 
 ## What this package does
 
-This package registers a custom `factory` provider for [Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent). It mirrors Factory Droid's authentication and request routing so `omp` can call Factory-hosted models with either Factory browser OAuth or a Factory API key.
+This package registers a custom `factory` provider for [Oh My Pi](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent). It mirrors Factory Droid's authentication, tool serialization, and multi-gateway request routing so `omp` can call Factory-hosted models with either Factory WorkOS browser OAuth or a Factory API key.
 
-Use it when you want:
+Key features:
 
-- Factory.ai model access inside `omp`
-- Droid-style Factory OAuth device login at `https://auth.factory.ai/device`
-- Factory-routed Claude, GPT, Codex, and open-weight coding models
-- Region-aware Factory API routing, including EU residency endpoints
-- One provider namespace for Factory models such as `factory/claude-opus-4-8` and `factory/gpt-5.5`
+- **Full Model Portfolio**: Access Claude Opus 5, GPT-5.6 Sol/Luna/Terra, GLM-5.3, Kimi K3, DeepSeek V4 Pro, MiniMax M3, and Grok 4.6 inside `omp`.
+- **Droid-Compatible OAuth**: Device login at `https://auth.factory.ai/device` with WorkOS token refresh and automatic organization derivation (`X-Factory-Org-Id`).
+- **Tri-Gateway Wire Routing**: Accurately routes to Factory's Anthropic (`/api/llm/a`), OpenAI Responses (`/api/llm/o/v1/responses`), and Fireworks (`/api/llm/o/v1/chat/completions`) endpoints.
+- **Native Tool Normalization & Wire Healing**: Converts tool calls and message history into Droid PascalCase primitives (`Read`, `Execute`, `Grep`, `Glob`, `LS`), and uses real-time stream markup healing to parse in-band reasoning and XML tool calls cleanly.
+- **Reasoning & Adaptive Thinking**: Supports Anthropic adaptive thinking for Claude Opus/Fable 5, effort ladders (`minimal` to `max`/`xhigh`), and preserves reasoning history across multi-turn tool loops for Fireworks-hosted models.
+- **Real-Time Quota Tracking**: Query live billing limits and credit balances with `/usage`.
+
+---
 
 ## Supported models
 
-The extension ships a 43-model curated static catalog, force-refreshes Factory's public model docs when an `omp` session starts, and merges any additional supported model IDs the docs list.
+The extension ships a curated static catalog and automatically checks Factory's model discovery endpoint for newly available models at session start.
 
 ### Claude and Anthropic-family models
+*Routed through Factory's Anthropic-compatible gateway (`/api/llm/a/v1/messages`):*
 
-These models route through Factory's Anthropic-compatible gateway:
-
-- `claude-fable-5`
-- `claude-opus-5`
-- `claude-opus-5-fast`
-- `claude-opus-4-8`
-- `claude-opus-4-8-fast`
-- `claude-opus-4-7`
-- `claude-opus-4-7-fast`
-- `claude-opus-4-6`
-- `claude-opus-4-6-fast`
-- `claude-opus-4-5-20251101`
-- `claude-sonnet-5`
-- `claude-sonnet-4-6`
-- `claude-sonnet-4-5-20250929`
-- `claude-haiku-4-5-20251001`
+- **Claude**: `claude-fable-5`, `claude-opus-5`, `claude-opus-5-fast`, `claude-opus-4-8`, `claude-opus-4-8-fast`, `claude-opus-4-7`, `claude-opus-4-7-fast`, `claude-opus-4-6`, `claude-opus-4-6-fast`, `claude-opus-4-5-20251101`, `claude-sonnet-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`, `atlas-07-21`, `aster-07-15` (`x-api-provider: anthropic`)
+- **MiniMax**: `minimax-m3`, `minimax-m2.7`, `minimax-m2.5` (`x-api-provider: fireworks`)
 
 ### GPT and Codex models
+*Routed through Factory's OpenAI Responses gateway (`/api/llm/o/v1/responses` with `x-api-provider: openai`):*
 
-These models route through Factory's OpenAI Responses-compatible gateway:
+- `gpt-5.6-sol`, `gpt-5.6-sol-fast`, `gpt-5.6-terra`, `gpt-5.6-luna`
+- `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.5-fast`
+- `gpt-5.4`, `gpt-5.4-fast`, `gpt-5.4-mini`, `gpt-5.4-mini-fast`
+- `gpt-5.3-codex`, `gpt-5.3-codex-fast`, `gpt-5.2-codex`, `gpt-5.1-codex-max`, `gpt-5-codex`
+- `gpt-5.2`, `gpt-5.1`, `gpt-5`
 
-- `gpt-5.6-sol`
-- `gpt-5.6-sol-fast`
-- `gpt-5.6-terra`
-- `gpt-5.6-luna`
-- `gpt-5.5`
-- `gpt-5.5-fast`
-- `gpt-5.5-pro`
-- `gpt-5.4`
-- `gpt-5.4-fast`
-- `gpt-5.4-mini`
-- `gpt-5.4-mini-fast`
-- `gpt-5.3-codex`
-- `gpt-5.3-codex-fast`
-- `gpt-5.2`
+### Factory Core and Open-Weight models
+*Routed through Factory's OpenAI Chat Completions gateway (`/api/llm/o/v1/chat/completions`):*
 
-### Factory Core and open-weight chat models
+- **Kimi**: `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5` (`x-api-provider: fireworks`)
+- **GLM**: `glm-5.3`, `glm-5.3-flash`, `glm-5.2`, `glm-5.2-fast`, `glm-5.1`, `glm-5`, `glm-4.7`, `glm-4.6` (`x-api-provider: fireworks`)
+- **DeepSeek**: `deepseek-v4-pro`, `deepseek-v4-flash-0731` (`x-api-provider: fireworks`)
+- **Nemotron / Inkling**: `nemotron-3-ultra`, `inkling` (`x-api-provider: fireworks`)
+- **Grok**: `grok-4.6`, `grok-4.5` (`x-api-provider: xai`)
 
-These models route through Factory's OpenAI chat-completions-compatible gateway:
+---
 
-- `inkling`
-- `glm-5.3`
-- `glm-5.2`
-- `glm-5.2-fast`
-- `glm-5.1`
-- `kimi-k3`
-- `kimi-k2.7-code`
-- `kimi-k2.6`
-- `kimi-k2.5`
-- `deepseek-v4-flash-0731`
-- `deepseek-v4-pro`
-- `minimax-m3`
-- `minimax-m2.7`
-- `minimax-m2.5`
-- `nemotron-3-ultra`
+## Installation & Management
 
-## Request routing
+### Install from GitHub
 
-Factory model requests go to Factory's LLM gateway. The default base URL is:
-
-```text
-https://api.factory.ai
-```
-
-OAuth credentials may provide a region-specific `apiEndpoint`, such as:
-
-```text
-https://api.eu.factory.ai
-```
-
-`FACTORY_API_BASE` overrides both the default host and any OAuth-provided `apiEndpoint`; this is useful for testing, proxies, or controlled environments.
-
-| Model family | Base path | Wire API | Header |
-| --- | --- | --- | --- |
-| Claude / Anthropic | `${apiEndpoint}/api/llm/a` | Anthropic Messages `/v1/messages` | `x-api-provider: anthropic` |
-| GPT / Codex | `${apiEndpoint}/api/llm/o/v1` | OpenAI Responses `/responses` | `x-api-provider: openai` |
-| GLM / Kimi / DeepSeek / MiniMax / Nemotron | `${apiEndpoint}/api/llm/o/v1` | OpenAI Chat Completions `/chat/completions` | `x-api-provider: factory` |
-
-Examples:
-
-```text
-factory/claude-opus-4-8
-→ https://api.factory.ai/api/llm/a/v1/messages
-
-factory/gpt-5.5
-→ https://api.factory.ai/api/llm/o/v1/responses
-
-factory/glm-5.1
-→ https://api.factory.ai/api/llm/o/v1/chat/completions
-```
-
-The extension also sends Droid-compatible Factory headers, including `X-Factory-Client`, `X-Client-Version`, `X-Factory-Org-Id`, `x-session-id`, `x-assistant-message-id`, and the appropriate `x-api-provider` value.
-
-## Installation
-
-Install dependencies with Bun:
+To install the extension into `omp`:
 
 ```zsh
+omp install https://github.com/TapZe/pi-provider-factory.git
+```
+
+### Uninstall
+
+To uninstall or remove the plugin from `omp`:
+
+```zsh
+omp plugin uninstall pi-provider-factory
+```
+
+### Local Development / Linking
+
+If you are developing locally:
+
+```zsh
+# 1. Install dependencies
 bun install
-```
 
-Link the extension into `omp`:
-
-```zsh
+# 2. Link into omp
 omp plugin link "$PWD"
 ```
 
-Confirm the provider is discoverable:
+Verify the provider is registered:
 
 ```zsh
 omp models find factory
 ```
 
-Force a fresh Factory catalog fetch at any time:
+---
 
-```zsh
-omp models refresh factory
-```
+## Request routing & Protocol Details
 
-This pulls Factory's public model docs for newly supported model IDs. If the docs fetch fails, the last successfully cached catalog is retained and the fetch is retried automatically — roughly every 5 minutes and at each session start.
+Factory model requests are directed to Factory's LLM gateway (`https://api.factory.ai` or region-specific endpoints like `https://api.eu.factory.ai`).
 
-## Authentication
-
-### Browser OAuth, recommended
-
-Run `omp`, log in to the Factory provider, and leave the API-key prompt blank:
+| Model Family | Wire Endpoint | Upstream Provider Header | Special Flags & Compat |
+| --- | --- | --- | --- |
+| **Claude** | `POST /api/llm/a/v1/messages` | `x-api-provider: anthropic` | `anthropic-version: 2023-06-01`<br>`anthropic-beta: interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14`<br>Adaptive thinking (`type: "adaptive"`) |
+| **MiniMax** | `POST /api/llm/a/v1/messages` | `x-api-provider: fireworks` | Served over Anthropic Messages protocol |
+| **GPT / Codex** | `POST /api/llm/o/v1/responses` | `x-api-provider: openai` | `OpenAI-Platform: org-bHuLtG1fGmYk5YaOihAAXFBw`<br>PascalCase tools (`Read`, `Execute`, `Grep`, `Glob`, `LS`) |
+| **Kimi / GLM / DeepSeek** | `POST /api/llm/o/v1/chat/completions` | `x-api-provider: fireworks` | `reasoning_history: "preserved"`<br>Stream markup healing (`thinking` / `kimi`)<br>Assistant reasoning signature replay |
+| **Grok** | `POST /api/llm/o/v1/chat/completions` | `x-api-provider: xai` | `reasoning_history: "preserved"` |
 
 ```text
 /login factory
@@ -233,11 +183,13 @@ reply with the single word ok
 
 Any factory model works the same way, e.g. `factory/claude-opus-4-8`, `factory/gpt-5.5`, or `factory/glm-5.2`.
 
-## Implementation notes
+### Droid System Prompt Attestation & Tool Normalization
 
-### Anthropic system prompt compatibility
+Factory's gateway enforces two critical invariants:
 
-Factory's Anthropic gateway rejects requests that use Anthropic's top-level `system` field. For Anthropic-family models only, this extension folds the system prompt into the first user turn before forwarding the request. OpenAI Responses and chat-completions routes keep their native prompt handling.
+1. **System Prompt Attestation**: Factory requires Droid system instructions as a prefix on incoming turns to validate client legitimacy and enforce active tool usage for reasoning models. The extension prepends `FACTORY_DROID_SYSTEM_PROMPT` while preserving Oh My Pi's system prompts.
+2. **Tool Name Normalization**: Models are prompted and trained on Droid's canonical PascalCase tool primitives (`Read`, `Execute`, `Grep`, `Glob`, `LS`, `Edit`, `Create`, `AskUser`, `TodoWrite`). The router maps all OMP tool names and message history references to these primitives so models invoke tools seamlessly across multi-turn sessions.
+3. **Stream Markup Healing**: Open models on Fireworks (GLM-5.3, Kimi K3, DeepSeek) that emit in-band `<tool_call>` XML or raw reasoning delimiters in the text stream are automatically parsed and sanitized in real-time by OMP's `StreamMarkupHealing` layer.
 
 ### API-key and OAuth credential formats
 
@@ -268,10 +220,11 @@ The expected OAuth URL is Factory's Droid device URL:
 https://auth.factory.ai/device
 ```
 
-If you see a generic WorkOS authorize URL, relink this plugin and log in again:
+If you see a generic WorkOS authorize URL, reinstall or relink the plugin and log in again:
 
 ```zsh
-omp plugin link "$PWD"
+omp plugin uninstall pi-provider-factory
+omp install https://github.com/TapZe/pi-provider-factory.git
 omp
 /logout factory
 /login factory
@@ -284,8 +237,7 @@ Most 403s are caused by one of these issues:
 1. `FACTORY_API_KEY` is set and overriding OAuth credentials.
 2. The OAuth token is not organization-scoped.
 3. The request is missing `X-Factory-Org-Id`.
-4. A non-droid system prompt was sent in the system field (Anthropic top-level `system`, OpenAI `instructions`, or a `system`-role message). Factory refuses non-droid system content on **every** route; the extension avoids this by folding the system prompt into the first user message.
-5. The wrong regional endpoint is being used.
+4. The wrong regional endpoint is being used.
 
 If `/api/cli/whoami` works but LLM calls still return `403 {"detail":"Forbidden",...}`, the credential is valid but Factory's LLM gateway is refusing that model/org request. Check Factory model entitlement for the org shown by the plugin diagnostic, then unset local overrides and re-login.
 
@@ -296,52 +248,39 @@ unset FACTORY_API_KEY FACTORY_ORG_ID FACTORY_ORGANIZATION_ID FACTORY_API_BASE
 omp
 /logout factory
 /login factory
-/model factory/claude-opus-4-8
-```
-
-Then test:
-
-```text
-reply with the single word ok
+/model factory/claude-opus-5
 ```
 
 ## FAQ
 
 ### What is Pi Provider Factory?
 
-Pi Provider Factory is an Oh My Pi extension that adds a `factory` provider for Factory.ai's Droid LLM gateway. It lets `omp` use Factory-routed Claude, GPT, Codex, and open-weight coding models with Droid-compatible OAuth and request headers.
+Pi Provider Factory is an Oh My Pi extension that adds a `factory` provider for Factory.ai's Droid LLM gateway. It lets `omp` use Factory-routed Claude, GPT, Codex, and open-weight coding models with Droid-compatible OAuth, request headers, and tool normalization.
 
 ### Does this call Anthropic or OpenAI directly?
 
 No. Requests go to Factory's gateway first. Factory then routes each request to the appropriate upstream family based on model ID and the `x-api-provider` header.
 
-### Which endpoint does `factory/claude-opus-4-8` use?
+### Which endpoint does `factory/claude-opus-5` use?
 
-`factory/claude-opus-4-8` uses Factory's Anthropic-compatible endpoint: `${apiEndpoint}/api/llm/a/v1/messages`. By default, that is `https://api.factory.ai/api/llm/a/v1/messages`.
+`factory/claude-opus-5` uses Factory's Anthropic-compatible endpoint: `${apiEndpoint}/api/llm/a/v1/messages` with adaptive thinking enabled (`x-api-provider: anthropic`).
 
-### Which endpoint does `factory/gpt-5.5` use?
+### Which endpoint does `factory/gpt-5.6-sol` use?
 
-`factory/gpt-5.5` uses Factory's OpenAI Responses-compatible endpoint: `${apiEndpoint}/api/llm/o/v1/responses`.
+`factory/gpt-5.6-sol` uses Factory's OpenAI Responses-compatible endpoint: `${apiEndpoint}/api/llm/o/v1/responses` with `OpenAI-Platform` headers and PascalCase tool definitions.
 
 ### Which endpoint do Factory Core models use?
 
-Most Factory Core open-weight models — `glm-5.2`, `glm-5.1`, `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5`, `deepseek-v4-pro`, `nemotron-3-ultra` — use `${apiEndpoint}/api/llm/o/v1/chat/completions`. MiniMax models (`minimax-m3`, `minimax-m2.7`, `minimax-m2.5`) are the exception: Factory serves them through the Anthropic-compatible endpoint `${apiEndpoint}/api/llm/a/v1/messages`. Every Factory Core model sends `x-api-provider: fireworks`.
+Most Factory Core open-weight models — `glm-5.3`, `kimi-k3`, `deepseek-v4-pro`, `nemotron-3-ultra`, `inkling` — use `${apiEndpoint}/api/llm/o/v1/chat/completions` with `reasoning_history: "preserved"` and `x-api-provider: fireworks` (or `x-api-provider: xai` for Grok). MiniMax models (`minimax-m3`, `minimax-m2.7`, `minimax-m2.5`) are served through the Anthropic-compatible endpoint `${apiEndpoint}/api/llm/a/v1/messages` with `x-api-provider: fireworks`.
 
 ### What `x-api-provider` value does each request send?
 
-Factory's gateway routes by the `x-api-provider` request header, which names the upstream and is independent of the API shape. Values are taken from observed `droid` CLI traffic:
+Factory's gateway routes by the `x-api-provider` request header, which names the upstream:
 
 - `anthropic` — Claude models (Anthropic endpoint)
 - `openai` — GPT and Codex models (OpenAI Responses endpoint)
-- `fireworks` — all Droid Core open models (GLM, Kimi, DeepSeek, MiniMax, Nemotron), including MiniMax which is served over the Anthropic API shape
-
-Sending the wrong value (for example `factory` for an open model) makes the gateway reject the request with `400 {"detail":"Invalid x-api-provider header"}`.
-
-### How does the extension handle system prompts?
-
-Factory's gateway enforces a client-attestation gate: it only accepts a request whose system field carries droid's own system prompt as a prefix. Any other system content — an Anthropic top-level `system`, an OpenAI `instructions` string, or a `system`-role chat message — is refused with `403 {"detail":"Forbidden",...}` on every route. A request with no system field is always accepted.
-
-Because Oh My Pi sends its own system prompt (not droid's), the extension folds that prompt into the first user message — wrapped in `<system>…</system>` — and leaves the system field empty. This delivers the instructions to the model while satisfying the gate, and avoids bundling droid's proprietary prompt or injecting a conflicting "You are Droid" identity. The fold is applied on all three routes.
+- `fireworks` — Droid Core open models (GLM, Kimi, DeepSeek, MiniMax, Nemotron, Inkling)
+- `xai` — Grok models
 
 ## Development
 
