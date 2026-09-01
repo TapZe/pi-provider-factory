@@ -66,13 +66,20 @@ function testFactoryModel(modelId: string): Parameters<typeof factoryStreamSimpl
   return model as unknown as Parameters<typeof factoryStreamSimple>[0];
 }
 
-async function captureFactoryCoreRequest(modelId: string): Promise<Record<string, unknown>> {
+type CapturedFactoryCoreRequest = {
+  body: Record<string, unknown>;
+  apiProvider: string | null;
+};
+
+async function captureFactoryCoreRequest(modelId: string): Promise<CapturedFactoryCoreRequest> {
   const originalFetch = globalThis.fetch;
   let requestBody: Record<string, unknown> | undefined;
+  let apiProvider: string | null | undefined;
 
   globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
     const [input, init] = args;
     const request = input instanceof Request ? input : new Request(typeof input === "string" ? input : input.toString(), init);
+    apiProvider = request.headers.get("x-api-provider");
     requestBody = (await request.json()) as Record<string, unknown>;
 
     return new Response(
@@ -124,11 +131,11 @@ async function captureFactoryCoreRequest(modelId: string): Promise<Record<string
     globalThis.fetch = originalFetch;
   }
 
-  if (!requestBody) {
+  if (!requestBody || apiProvider === undefined) {
     throw new Error("Factory request was not captured");
   }
 
-  return requestBody;
+  return { body: requestBody, apiProvider };
 }
 
 describe("Factory Router & Tool Execution Configuration", () => {
@@ -217,6 +224,7 @@ describe("Factory Router & Tool Execution Configuration", () => {
     expect(upstreamProviderFor("gpt-5.6-sol")).toBe("openai");
     expect(familyOf("kimi-k3")).toBe("openai-completions");
     expect(upstreamProviderFor("kimi-k3")).toBe("fireworks");
+    expect(familyOf("grok-4.6")).toBe("unsupported");
   });
   it("preserves Factory Core reasoning and tool-call history", async () => {
     const expectedReasoningContent = new Map([
@@ -226,11 +234,11 @@ describe("Factory Router & Tool Execution Configuration", () => {
     ]);
 
     for (const [modelId, reasoningContent] of expectedReasoningContent) {
-      const request = await captureFactoryCoreRequest(modelId);
+      const { body: request } = await captureFactoryCoreRequest(modelId);
       const messages = request.messages as Array<Record<string, unknown>>;
       const assistantToolCall = messages.find((message) => Array.isArray(message.tool_calls));
 
-      expect(request.reasoning_history).toBe("preserved");
+      expect(request.reasoning_history).toBe(modelId.startsWith("deepseek-") ? "interleaved" : "preserved");
       expect(request.tool_choice).toBe("auto");
       expect(request.tools).toHaveLength(1);
       expect(assistantToolCall?.reasoning_content).toBe(reasoningContent);

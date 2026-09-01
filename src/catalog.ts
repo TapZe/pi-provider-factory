@@ -131,7 +131,6 @@ export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
     api: CUSTOM_API,
     reasoning: config.reasoning,
     thinking: config.thinking,
-    supportsTools: true,
     input: config.input,
     cost: config.cost ?? defaultCostFor(config.id),
     premiumMultiplier: config.premiumMultiplier,
@@ -549,7 +548,6 @@ export function familyOf(id: string): FactoryModelFamily {
     id.startsWith("kimi-") ||
     id.startsWith("deepseek-") ||
     id.startsWith("nemotron-") ||
-    id.startsWith("grok-") ||
     id === "inkling" ||
     id.startsWith("inkling-")
   ) {
@@ -559,7 +557,7 @@ export function familyOf(id: string): FactoryModelFamily {
   return "unsupported";
 }
 
-export type FactoryUpstreamProvider = "anthropic" | "openai" | "fireworks" | "xai";
+export type FactoryUpstreamProvider = "anthropic" | "openai" | "fireworks";
 
 // Factory's `x-api-provider` request header names the UPSTREAM the gateway routes
 // to, independent of the wire API shape. Droid Core open models (GLM, Kimi,
@@ -573,10 +571,5 @@ export function upstreamProviderFor(id: string): FactoryUpstreamProvider {
   if (id.startsWith("gpt-") || id.endsWith("-codex")) {
     return "openai";
   }
-
-  if (id.startsWith("grok-")) {
-    return "xai";
-  }
-
   return "fireworks";
 }
