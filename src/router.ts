@@ -514,12 +514,18 @@ function buildTargetModel(
     headers["X-Factory-Org-Id"] = orgId;
   }
 
+  const isGlm = model.id.startsWith("glm-");
+  const isDeepseek = model.id.startsWith("deepseek-");
+  const isKimi = model.id.startsWith("kimi-");
+  const markupPattern = isGlm || isDeepseek ? "thinking" : isKimi ? "kimi" : undefined;
+
   const compat: ModelSpec<FactoryTargetApi>["compat"] =
     targetApi === "openai-completions"
       ? {
           extraBody: {
             reasoning_history: "preserved",
           },
+          streamMarkupHealingPattern: markupPattern,
           requiresReasoningContentForToolCalls: true,
           allowsSyntheticReasoningContentForToolCalls: true,
           requiresAssistantContentForToolCalls: true,
