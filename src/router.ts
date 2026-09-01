@@ -517,13 +517,13 @@ function buildTargetModel(
   const isGlm = model.id.startsWith("glm-");
   const isDeepseek = model.id.startsWith("deepseek-");
   const isKimi = model.id.startsWith("kimi-");
-  const markupPattern = isGlm ? "thinking" : isDeepseek ? "dsml" : isKimi ? "kimi" : undefined;
+  const markupPattern = isGlm || isDeepseek ? "thinking" : isKimi ? "kimi" : undefined;
 
   const compat: ModelSpec<FactoryTargetApi>["compat"] =
     targetApi === "openai-completions"
       ? {
           extraBody: {
-            reasoning_history: "preserved",
+            reasoning_history: isDeepseek ? "interleaved" : "preserved",
           },
           streamMarkupHealingPattern: markupPattern,
           stripDeepseekSpecialTokens: isDeepseek,
