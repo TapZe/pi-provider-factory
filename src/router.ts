@@ -514,6 +514,18 @@ function buildTargetModel(
     headers["X-Factory-Org-Id"] = orgId;
   }
 
+  const compat: ModelSpec<FactoryTargetApi>["compat"] =
+    targetApi === "openai-completions"
+      ? {
+          extraBody: {
+            reasoning_history: "preserved",
+          },
+          requiresReasoningContentForToolCalls: true,
+          allowsSyntheticReasoningContentForToolCalls: true,
+          requiresAssistantContentForToolCalls: true,
+        }
+      : undefined;
+
   const spec: ModelSpec<FactoryTargetApi> = {
     provider: PROVIDER_ID,
     id: model.id,
@@ -522,6 +534,7 @@ function buildTargetModel(
     baseUrl,
     reasoning: model.reasoning,
     thinking: model.thinking,
+    compat,
     input: model.input,
     cost: model.cost,
     premiumMultiplier: model.premiumMultiplier,
