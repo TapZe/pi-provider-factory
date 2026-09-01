@@ -3,7 +3,7 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { Api, Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import { createProviderErrorMessage } from "@oh-my-pi/pi-ai/providers/error-message";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { streamSimple, type AssistantMessage, type Context } from "@oh-my-pi/pi-ai";
+import { streamSimple, type AssistantMessage, type Context, type StreamOptions } from "@oh-my-pi/pi-ai";
 
 import { familyOf, upstreamProviderFor } from "./catalog";
 import {
@@ -427,66 +427,26 @@ const DROID_TOOL_NAME_MAP: Record<string, string> = {
   "cron-delete-cli": "Loop",
 };
 
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
+
+function clampReasoningEffort(effort: Effort | undefined, modelId: string): Effort | undefined {
+  if (!effort) return undefined;
+  if ((effort as string) === "off" || (effort as string) === "none") return undefined;
+  if (modelId.startsWith("kimi-") && (effort as string) === "max") return Effort.XHigh;
+  return effort;
+}
+
 // Factory's gateway requires requests to carry Droid's system prompt prefix
 // ("You are Droid, an AI software engineering agent built by Factory.")
 // Requests missing this prefix or with system stripped return 403 Forbidden.
-// We ensure the required Droid prefix is at the start of the system prompt array,
-// and tools are aliased to Droid's fine-tuned PascalCase names on the wire.
 export function prepareContextForFactory(context: Context): Context {
   const existingPrompts = context.systemPrompt?.filter((part) => part.length > 0) ?? [];
   const alreadyHasDroidPrefix = existingPrompts.some((p) =>
     p.includes("You are Droid, an AI software engineering agent built by Factory"),
   );
 
-  const tools = context.tools?.map((tool) => {
-    const droidName = DROID_TOOL_NAME_MAP[tool.name.toLowerCase()];
-    if (droidName) {
-      return {
-        ...tool,
-        name: droidName,
-        customWireName: droidName,
-      };
-    }
-    return tool;
-  });
-
-  const messages = context.messages?.map((msg) => {
-    if (msg.role === "assistant" && Array.isArray(msg.content)) {
-      const content = msg.content.map((block) => {
-        if (block.type === "toolCall") {
-          const droidName = DROID_TOOL_NAME_MAP[block.name.toLowerCase()];
-          if (droidName) {
-            return {
-              ...block,
-              name: droidName,
-              customWireName: droidName,
-            };
-          }
-        }
-        return block;
-      });
-      return { ...msg, content };
-    }
-
-    if (msg.role === "toolResult") {
-      const candidate = msg.toolName ?? ((msg as unknown as Record<string, unknown>).name as string | undefined);
-      const droidName = candidate ? DROID_TOOL_NAME_MAP[candidate.toLowerCase()] : undefined;
-      if (droidName) {
-        return {
-          ...msg,
-          toolName: droidName,
-          customWireName: droidName,
-        };
-      }
-    }
-
-    return msg;
-  });
-
   return {
     ...context,
-    tools,
-    messages: messages ?? context.messages,
     systemPrompt: alreadyHasDroidPrefix ? existingPrompts : [FACTORY_DROID_SYSTEM_PROMPT, ...existingPrompts],
   };
 }
@@ -574,9 +534,11 @@ export const factoryStreamSimple: NonNullable<ProviderConfig["streamSimple"]> = 
     const routedContext = prepareContextForFactory(context);
     const hasTools = (routedContext.tools && routedContext.tools.length > 0) ?? false;
     const resolvedToolChoice = options?.toolChoice ?? (hasTools ? "auto" : undefined);
+    const resolvedReasoning = clampReasoningEffort(options?.reasoning, model.id);
 
     const inner = streamSimple(target, routedContext, {
       ...options,
+      reasoning: resolvedReasoning,
       toolChoice: resolvedToolChoice,
       apiKey: credential.access,
       headers: {

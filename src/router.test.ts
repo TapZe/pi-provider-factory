@@ -18,7 +18,7 @@ describe("Factory Router & Tool Execution Configuration", () => {
     );
   });
 
-  it("prepends Droid system prompt prefix and aliases tools to Droid PascalCase names", () => {
+  it("prepends Droid system prompt prefix while preserving tools and messages", () => {
     const context = {
       systemPrompt: ["You are Oh My Pi coding assistant."],
       messages: [],
@@ -40,13 +40,11 @@ describe("Factory Router & Tool Execution Configuration", () => {
 
     expect(prepared.systemPrompt?.[0]).toBe(FACTORY_DROID_SYSTEM_PROMPT);
     expect(prepared.systemPrompt?.[1]).toBe("You are Oh My Pi coding assistant.");
-    expect(prepared.tools?.[0].name).toBe("Read");
-    expect(prepared.tools?.[0].customWireName).toBe("Read");
-    expect(prepared.tools?.[1].name).toBe("Execute");
-    expect(prepared.tools?.[1].customWireName).toBe("Execute");
+    expect(prepared.tools?.[0].name).toBe("read_file");
+    expect(prepared.tools?.[1].name).toBe("bash");
   });
 
-  it("maps assistant toolCall and toolResult in message history to Droid names", () => {
+  it("preserves assistant messages and tool results verbatim", () => {
     const context = {
       messages: [
         {
@@ -73,12 +71,10 @@ describe("Factory Router & Tool Execution Configuration", () => {
     const prepared = prepareContextForFactory(context as any);
 
     const assistantMsg = prepared.messages?.[0];
-    expect((assistantMsg?.content as any[])[0].name).toBe("Read");
-    expect((assistantMsg?.content as any[])[0].customWireName).toBe("Read");
+    expect((assistantMsg?.content as any[])[0].name).toBe("read_file");
 
     const toolResultMsg = prepared.messages?.[1] as any;
-    expect(toolResultMsg?.toolName).toBe("Read");
-    expect(toolResultMsg?.customWireName).toBe("Read");
+    expect(toolResultMsg?.toolName).toBe("read_file");
   });
 
   it("correctly maps model families and upstream providers", () => {
