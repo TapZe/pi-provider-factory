@@ -131,6 +131,7 @@ export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
     api: CUSTOM_API,
     reasoning: config.reasoning,
     thinking: config.thinking,
+    supportsTools: true,
     input: config.input,
     cost: config.cost ?? defaultCostFor(config.id),
     premiumMultiplier: config.premiumMultiplier,
