@@ -7,6 +7,7 @@ const FACTORY_MODEL_DOCS_URL = "https://docs.factory.ai/models.md";
 export type FactoryModelDocsEntry = {
   id: string;
   displayName: string;
+  multiplier?: number;
   reasoning: string;
 };
 
@@ -16,6 +17,16 @@ function stripDocsMarkup(value: string): string {
     .replace(/\\(.)/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function parseMultiplier(cell: string | undefined): number | undefined {
+  if (!cell) return undefined;
+  const match = cell.match(/([\d.]+)[\s*×xX]/);
+  if (match && match[1]) {
+    const parsed = parseFloat(match[1]);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 // Section-independent: the model ID's family is the only gate. Any table row
@@ -49,10 +60,12 @@ export function parseFactoryModelDocs(markdown: string): FactoryModelDocsEntry[]
     }
 
     const displayName = stripDocsMarkup(cells[1] ?? "").replace(/[\s*†‡§]+$/u, "");
+    const multiplier = parseMultiplier(cells[3]);
 
     entries.push({
       id,
       displayName: displayName.length > 0 ? displayName : id,
+      multiplier,
       reasoning: cells[4] ?? "",
     });
   }
@@ -68,6 +81,7 @@ function docsEntryToModel(entry: FactoryModelDocsEntry): ProviderModelConfig | n
         name: `${entry.displayName} (Factory)`,
         reasoning: true,
         input: ["text", "image"],
+        premiumMultiplier: entry.multiplier,
         contextWindow: 200000,
         maxTokens: 64000,
       });
@@ -77,6 +91,7 @@ function docsEntryToModel(entry: FactoryModelDocsEntry): ProviderModelConfig | n
         name: `${entry.displayName} (Factory)`,
         reasoning: true,
         input: ["text", "image"],
+        premiumMultiplier: entry.multiplier,
         contextWindow: 400000,
         maxTokens: 128000,
       });
@@ -86,6 +101,7 @@ function docsEntryToModel(entry: FactoryModelDocsEntry): ProviderModelConfig | n
         name: `${entry.displayName} (Factory Core)`,
         reasoning: true,
         input: ["text"],
+        premiumMultiplier: entry.multiplier,
         contextWindow: 200000,
         maxTokens: 32000,
       });

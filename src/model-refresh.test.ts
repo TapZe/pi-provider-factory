@@ -47,6 +47,25 @@ describe("parseFactoryModelDocs", () => {
     expect(entries.some((entry) => entry.id.startsWith("gemini-"))).toBe(false);
   });
 
+  test("extracts numeric multiplier from the multiplier column", () => {
+    const fable = entries.find((entry) => entry.id === "claude-fable-5");
+    expect(fable?.multiplier).toBe(4);
+    const kimi = entries.find((entry) => entry.id === "kimi-k2.6");
+    expect(kimi?.multiplier).toBe(0.4);
+  });
+
+  test("parses inkling open model", () => {
+    const inklingFixture = `
+| Model | Model ID | Multiplier | Reasoning |
+| --- | --- | --- | --- |
+| Inkling | \`inkling\` | 0.4× | Standard |
+`;
+    const inklingEntries = parseFactoryModelDocs(inklingFixture);
+    expect(inklingEntries.length).toBe(1);
+    expect(inklingEntries[0]?.id).toBe("inkling");
+    expect(inklingEntries[0]?.multiplier).toBe(0.4);
+  });
+
   test("returns no entries for non-markdown input", () => {
     expect(parseFactoryModelDocs("<html>not markdown</html>")).toEqual([]);
   });

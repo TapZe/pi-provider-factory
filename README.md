@@ -18,22 +18,24 @@ Use it when you want:
 
 ## Supported models
 
-The extension ships a 31-model curated static catalog, force-refreshes Factory's public model docs when an `omp` session starts, and merges any additional supported model IDs the docs list.
+The extension ships a 43-model curated static catalog, force-refreshes Factory's public model docs when an `omp` session starts, and merges any additional supported model IDs the docs list.
 
 ### Claude and Anthropic-family models
 
 These models route through Factory's Anthropic-compatible gateway:
 
+- `claude-fable-5`
+- `claude-opus-5`
+- `claude-opus-5-fast`
 - `claude-opus-4-8`
 - `claude-opus-4-8-fast`
 - `claude-opus-4-7`
 - `claude-opus-4-7-fast`
 - `claude-opus-4-6`
 - `claude-opus-4-6-fast`
+- `claude-opus-4-5-20251101`
 - `claude-sonnet-5`
 - `claude-sonnet-4-6`
-- `claude-opus-4-5-20251101`
-- `claude-fable-5`
 - `claude-sonnet-4-5-20250929`
 - `claude-haiku-4-5-20251001`
 
@@ -41,12 +43,17 @@ These models route through Factory's Anthropic-compatible gateway:
 
 These models route through Factory's OpenAI Responses-compatible gateway:
 
+- `gpt-5.6-sol`
+- `gpt-5.6-sol-fast`
+- `gpt-5.6-terra`
+- `gpt-5.6-luna`
 - `gpt-5.5`
 - `gpt-5.5-fast`
 - `gpt-5.5-pro`
 - `gpt-5.4`
 - `gpt-5.4-fast`
 - `gpt-5.4-mini`
+- `gpt-5.4-mini-fast`
 - `gpt-5.3-codex`
 - `gpt-5.3-codex-fast`
 - `gpt-5.2`
@@ -55,11 +62,16 @@ These models route through Factory's OpenAI Responses-compatible gateway:
 
 These models route through Factory's OpenAI chat-completions-compatible gateway:
 
+- `inkling`
+- `glm-5.3`
 - `glm-5.2`
+- `glm-5.2-fast`
 - `glm-5.1`
+- `kimi-k3`
 - `kimi-k2.7-code`
 - `kimi-k2.6`
 - `kimi-k2.5`
+- `deepseek-v4-flash-0731`
 - `deepseek-v4-pro`
 - `minimax-m3`
 - `minimax-m2.7`
