@@ -288,18 +288,53 @@ export function prepareContextForFactory(context: Context): Context {
 
   const tools = context.tools?.map((tool) => {
     const droidName = DROID_TOOL_NAME_MAP[tool.name.toLowerCase()];
-    if (droidName && !tool.customWireName) {
+    if (droidName) {
       return {
         ...tool,
+        name: droidName,
         customWireName: droidName,
       };
     }
     return tool;
   });
 
+  const messages = context.messages?.map((msg) => {
+    if (msg.role === "assistant" && Array.isArray(msg.content)) {
+      const content = msg.content.map((block) => {
+        if (block.type === "toolCall") {
+          const droidName = DROID_TOOL_NAME_MAP[block.name.toLowerCase()];
+          if (droidName) {
+            return {
+              ...block,
+              name: droidName,
+              customWireName: droidName,
+            };
+          }
+        }
+        return block;
+      });
+      return { ...msg, content };
+    }
+
+    if (msg.role === "toolResult") {
+      const candidate = msg.toolName ?? ((msg as unknown as Record<string, unknown>).name as string | undefined);
+      const droidName = candidate ? DROID_TOOL_NAME_MAP[candidate.toLowerCase()] : undefined;
+      if (droidName) {
+        return {
+          ...msg,
+          toolName: droidName,
+          customWireName: droidName,
+        };
+      }
+    }
+
+    return msg;
+  });
+
   return {
     ...context,
     tools,
+    messages: messages ?? context.messages,
     systemPrompt: alreadyHasDroidPrefix ? existingPrompts : [FACTORY_DROID_SYSTEM_PROMPT, ...existingPrompts],
   };
 }

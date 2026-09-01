@@ -41,8 +41,45 @@ describe("Factory Router & Tool Execution Configuration", () => {
 
     expect(prepared.systemPrompt?.[0]).toBe(FACTORY_DROID_SYSTEM_PROMPT);
     expect(prepared.systemPrompt?.[1]).toBe("You are Oh My Pi coding assistant.");
+    expect(prepared.tools?.[0].name).toBe("Read");
     expect(prepared.tools?.[0].customWireName).toBe("Read");
+    expect(prepared.tools?.[1].name).toBe("Execute");
     expect(prepared.tools?.[1].customWireName).toBe("Execute");
+  });
+
+  it("maps assistant toolCall and toolResult in message history to Droid names", () => {
+    const context = {
+      messages: [
+        {
+          role: "assistant" as const,
+          content: [
+            {
+              type: "toolCall" as const,
+              id: "tc_1",
+              name: "read_file",
+              arguments: { path: "src/index.ts" },
+            },
+          ],
+        },
+        {
+          role: "toolResult" as const,
+          toolCallId: "tc_1",
+          toolName: "read_file",
+          content: [{ type: "text" as const, text: "file content" }],
+          isError: false,
+        },
+      ],
+    };
+
+    const prepared = prepareContextForFactory(context as any);
+
+    const assistantMsg = prepared.messages?.[0];
+    expect((assistantMsg?.content as any[])[0].name).toBe("Read");
+    expect((assistantMsg?.content as any[])[0].customWireName).toBe("Read");
+
+    const toolResultMsg = prepared.messages?.[1] as any;
+    expect(toolResultMsg?.toolName).toBe("Read");
+    expect(toolResultMsg?.customWireName).toBe("Read");
   });
 
   it("does not duplicate Droid system prompt prefix if already present", () => {
