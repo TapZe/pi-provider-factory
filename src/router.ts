@@ -533,7 +533,6 @@ function buildTargetModel(
     api: targetApi,
     baseUrl,
     reasoning: model.reasoning,
-    thinking: model.thinking,
     compat,
     input: model.input,
     cost: model.cost,

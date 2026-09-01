@@ -82,13 +82,15 @@ describe("Factory Router & Tool Execution Configuration", () => {
     expect(toolResultMsg?.customWireName).toBe("Read");
   });
 
-  it("configures thinking capabilities with max/xhigh effort support for reasoning models", () => {
-    const { FACTORY_MODELS } = require("./catalog");
-    const kimiK3 = FACTORY_MODELS.find((m: any) => m.id === "kimi-k3");
-    expect(kimiK3).toBeDefined();
-    expect(kimiK3.reasoning).toBe(true);
-    expect(kimiK3.thinking).toBeDefined();
-    expect(kimiK3.thinking.efforts).toContain("xhigh");
-    expect(kimiK3.thinking.effortMap.xhigh).toBeDefined();
+  it("correctly maps model families and upstream providers", () => {
+    const { familyOf, upstreamProviderFor } = require("./catalog");
+    expect(familyOf("claude-opus-5")).toBe("anthropic");
+    expect(upstreamProviderFor("claude-opus-5")).toBe("anthropic");
+    expect(familyOf("minimax-m3")).toBe("anthropic");
+    expect(upstreamProviderFor("minimax-m3")).toBe("fireworks");
+    expect(familyOf("gpt-5.6-sol")).toBe("openai-responses");
+    expect(upstreamProviderFor("gpt-5.6-sol")).toBe("openai");
+    expect(familyOf("kimi-k3")).toBe("openai-completions");
+    expect(upstreamProviderFor("kimi-k3")).toBe("fireworks");
   });
 });
