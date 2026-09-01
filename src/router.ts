@@ -1,11 +1,13 @@
 import type { ProviderConfig } from "@oh-my-pi/pi-coding-agent";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import type { Api, Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import { createProviderErrorMessage } from "@oh-my-pi/pi-ai/providers/error-message";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { streamSimple, type AssistantMessage, type Context, type StreamOptions } from "@oh-my-pi/pi-ai";
 
 import { familyOf, upstreamProviderFor } from "./catalog";
+import { factoryStreamMarkupHealingPattern, normalizeFactoryToolCallStream } from "./tool-call-normalization";
 import {
   ANTHROPIC_BETAS,
   ANTHROPIC_VERSION,
@@ -223,6 +225,7 @@ function routeWithFactoryDiagnostics(
   return outer;
 }
 
+
 function targetApiFor(modelId: string): FactoryTargetApi | null {
   // MiniMax is a Droid Core (open) model, but Factory serves it through the
   // Anthropic-compatible endpoint (observed in droid 0.153.1), not the OpenAI
@@ -254,180 +257,7 @@ function buildRequestHeaders(options: Parameters<NonNullable<ProviderConfig["str
   };
 }
 
-const DROID_TOOL_NAME_MAP: Record<string, string> = {
-  // Execute (Bash / Terminal / CLI)
-  bash: "Execute",
-  shell: "Execute",
-  runcommand: "Execute",
-  executecommand: "Execute",
-  exec: "Execute",
-  run: "Execute",
-  terminal: "Execute",
-  bashtool: "Execute",
-  bash_tool: "Execute",
-  "bash-tool": "Execute",
-  run_command: "Execute",
-  "run-command": "Execute",
-  execute_command: "Execute",
-  "execute-command": "Execute",
-  execute_terminal_command: "Execute",
-  "execute-terminal-command": "Execute",
-  execute_bash: "Execute",
-  "execute-bash": "Execute",
-  execute_cli: "Execute",
-  "execute-cli": "Execute",
-  command: "Execute",
 
-  // Read (Files / Cat)
-  read: "Read",
-  readfile: "Read",
-  fileread: "Read",
-  file_read: "Read",
-  "file-read": "Read",
-  read_file: "Read",
-  "read-file": "Read",
-  read_cli: "Read",
-  "read-cli": "Read",
-  view_file: "Read",
-  "view-file": "Read",
-  open_file: "Read",
-  "open-file": "Read",
-  cat: "Read",
-
-  // Create (Write / File Creation)
-  write: "Create",
-  writefile: "Create",
-  write_file: "Create",
-  "write-file": "Create",
-  createfile: "Create",
-  create_file: "Create",
-  "create-file": "Create",
-  create_cli: "Create",
-  "create-cli": "Create",
-
-  // Edit (File Editing / Multiedit)
-  edit: "Edit",
-  editfile: "Edit",
-  edit_file: "Edit",
-  "edit-file": "Edit",
-  edit_cli: "Edit",
-  "edit-cli": "Edit",
-  multiedit: "Edit",
-  multi_edit: "Edit",
-  "multi-edit": "Edit",
-  ast_edit: "Edit",
-  "ast-edit": "Edit",
-
-  // ApplyPatch
-  apply_patch: "ApplyPatch",
-  "apply-patch": "ApplyPatch",
-  apply_patch_cli: "ApplyPatch",
-  "apply-patch-cli": "ApplyPatch",
-
-  // Grep (Content / Pattern Search)
-  grep: "Grep",
-  grep_tool: "Grep",
-  "grep-tool": "Grep",
-  greptool: "Grep",
-  grep_tool_cli: "Grep",
-  grep_search_cli: "Grep",
-  "grep-search-cli": "Grep",
-  grep_search: "Grep",
-  "grep-search": "Grep",
-  search: "Grep",
-  search_tool_bm25: "Grep",
-  ast_grep: "Grep",
-  "ast-grep": "Grep",
-  rg: "Grep",
-  ripgrep: "Grep",
-
-  // Glob (File finding / name search)
-  glob: "Glob",
-  glob_tool: "Glob",
-  "glob-tool": "Glob",
-  globtool: "Glob",
-  glob_search_cli: "Glob",
-  "glob-search-cli": "Glob",
-  search_files: "Glob",
-  "search-files": "Glob",
-  searchfiles: "Glob",
-  find: "Glob",
-  find_files: "Glob",
-  "find-files": "Glob",
-
-  // LS (Directory Listing)
-  ls: "LS",
-  dir: "LS",
-  list_dir: "LS",
-  "list-dir": "LS",
-  listfiles: "LS",
-  list_files: "LS",
-  "list-files": "LS",
-  list_folder: "LS",
-  "list-folder": "LS",
-  listfolder: "LS",
-  view_folder: "LS",
-  "view-folder": "LS",
-  viewfolder: "LS",
-  ls_cli: "LS",
-  "ls-cli": "LS",
-
-  // Web & URL Fetching
-  web_search: "WebSearch",
-  "web-search": "WebSearch",
-  websearch: "WebSearch",
-  fetch: "FetchUrl",
-  fetch_url: "FetchUrl",
-  "fetch-url": "FetchUrl",
-  fetchurl: "FetchUrl",
-
-  // User Interaction & Todos
-  ask: "AskUser",
-  ask_user: "AskUser",
-  "ask-user": "AskUser",
-  ask_user_cli: "AskUser",
-  "ask-user-cli": "AskUser",
-  askuser: "AskUser",
-  todo: "TodoWrite",
-  todo_write: "TodoWrite",
-  "todo-write": "TodoWrite",
-  todowrite: "TodoWrite",
-
-  // Tasks & Subagents
-  task: "Task",
-  task_cli: "Task",
-  "task-cli": "Task",
-  subagent: "Task",
-  sub_agent: "Task",
-  "sub-agent": "Task",
-  task_output: "TaskOutput",
-  "task-output": "TaskOutput",
-  task_output_cli: "TaskOutput",
-  "task-output-cli": "TaskOutput",
-  task_stop: "TaskStop",
-  "task-stop": "TaskStop",
-  task_stop_cli: "TaskStop",
-  "task-stop-cli": "TaskStop",
-
-  // Tools & Skills & Loops
-  tool_search: "ToolSearch",
-  "tool-search": "ToolSearch",
-  tool_search_cli: "ToolSearch",
-  "tool-search-cli": "ToolSearch",
-  manage_skill: "Skill",
-  skill: "Skill",
-  skill_cli: "Skill",
-  "skill-cli": "Skill",
-  schedule: "Loop",
-  croncreate: "Loop",
-  "cron-create-cli": "Loop",
-  cronlist: "Loop",
-  "cron-list-cli": "Loop",
-  crondelete: "Loop",
-  "cron-delete-cli": "Loop",
-};
-
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
 
 function clampReasoningEffort(effort: Effort | undefined, modelId: string): Effort | undefined {
   if (!effort) return undefined;
@@ -474,16 +304,15 @@ function buildTargetModel(
     headers["X-Factory-Org-Id"] = orgId;
   }
 
-  const isGlm = model.id.startsWith("glm-");
   const isDeepseek = model.id.startsWith("deepseek-");
   const isKimi = model.id.startsWith("kimi-");
-  const markupPattern = isGlm || isDeepseek ? "thinking" : isKimi ? "kimi" : undefined;
+  const markupPattern = factoryStreamMarkupHealingPattern(model.id);
 
   const compat: ModelSpec<FactoryTargetApi>["compat"] =
     targetApi === "openai-completions"
       ? {
           extraBody: {
-            reasoning_history: isDeepseek ? "interleaved" : "preserved",
+            reasoning_history: "preserved",
           },
           streamMarkupHealingPattern: markupPattern,
           stripDeepseekSpecialTokens: isDeepseek,
@@ -502,6 +331,7 @@ function buildTargetModel(
     api: targetApi,
     baseUrl,
     reasoning: model.reasoning,
+    supportsTools: true,
     compat,
     input: model.input,
     cost: model.cost,
@@ -547,8 +377,13 @@ export const factoryStreamSimple: NonNullable<ProviderConfig["streamSimple"]> = 
         ...(options?.headers ?? {}),
       },
     });
+    const normalized = normalizeFactoryToolCallStream(
+      inner,
+      routedContext.tools,
+      targetApi === "openai-completions",
+    );
 
-    return routeWithFactoryDiagnostics(inner, { model, targetApi, credential, apiEndpoint });
+    return routeWithFactoryDiagnostics(normalized, { model, targetApi, credential, apiEndpoint });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
