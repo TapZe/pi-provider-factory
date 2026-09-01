@@ -487,6 +487,7 @@ function buildTargetModel(
           },
           streamMarkupHealingPattern: markupPattern,
           stripDeepseekSpecialTokens: isDeepseek,
+          requiresToolResultName: isKimi,
           requiresReasoningContentForToolCalls: true,
           requiresReasoningContentForAllAssistantTurns: isDeepseek,
           allowsSyntheticReasoningContentForToolCalls: !isDeepseek,
