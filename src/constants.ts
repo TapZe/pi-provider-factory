@@ -24,8 +24,53 @@ export const FACTORY_ORG_ID = factoryOrgId && factoryOrgId.length > 0 ? factoryO
 export const ANTHROPIC_BASE = `${FACTORY_API}/api/llm/a`;
 export const OPENAI_BASE = `${FACTORY_API}/api/llm/o/v1`;
 
+const HOSTED_FACTORY_HOSTNAME = /^api(\.[a-z0-9-]+)?\.factory\.ai$/i;
+const SAFE_REGION_LABEL = /^[a-z0-9-]+$/i;
+
+export function validateHostedFactoryApiOrigin(urlLike: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(urlLike.trim());
+  } catch {
+    throw new Error("Invalid Factory API endpoint URL");
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw new Error("Factory API endpoint must use HTTPS");
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new Error("Factory API endpoint must not contain credentials");
+  }
+
+  if (parsed.search || parsed.hash) {
+    throw new Error("Factory API endpoint must not contain query or fragment");
+  }
+
+  const pathname = parsed.pathname.replace(/\/+$/, "");
+  if (pathname.length > 0) {
+    throw new Error("Factory API endpoint must be an origin without a path prefix");
+  }
+
+  if (parsed.port) {
+    throw new Error("Factory API endpoint must not use a custom port");
+  }
+
+  if (!HOSTED_FACTORY_HOSTNAME.test(parsed.hostname)) {
+    throw new Error(`Factory API endpoint host ${parsed.hostname} is not an authorized Factory domain`);
+  }
+
+  return `https://${parsed.hostname.toLowerCase()}`;
+}
+
 export function resolveFactoryApiBase(apiEndpoint?: string | null): string {
-  return FACTORY_API_BASE_OVERRIDDEN ? FACTORY_API : apiEndpoint ?? FACTORY_API;
+  if (FACTORY_API_BASE_OVERRIDDEN) {
+    return FACTORY_API;
+  }
+  if (!apiEndpoint || apiEndpoint.trim().length === 0) {
+    return FACTORY_API;
+  }
+  return validateHostedFactoryApiOrigin(apiEndpoint);
 }
 
 export function factoryApiForRegion(region: string | undefined): string {
@@ -33,15 +78,24 @@ export function factoryApiForRegion(region: string | undefined): string {
     return FACTORY_API;
   }
 
-  if (region.startsWith("http://") || region.startsWith("https://")) {
-    return region;
+  const trimmed = region.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    if (FACTORY_API_BASE_OVERRIDDEN) {
+      return FACTORY_API;
+    }
+    return validateHostedFactoryApiOrigin(trimmed);
   }
 
-  if (region === "eu" || region === "europe") {
+  const lower = trimmed.toLowerCase();
+  if (lower === "eu" || lower === "europe") {
     return "https://api.eu.factory.ai";
   }
 
-  return `https://api.${region}.factory.ai`;
+  if (!SAFE_REGION_LABEL.test(trimmed)) {
+    throw new Error(`Invalid Factory region identifier: ${trimmed}`);
+  }
+
+  return `https://api.${lower}.factory.ai`;
 }
 export const FACTORY_CLIENT_VERSION = "0.208.2";
 export const FACTORY_HEADERS = {

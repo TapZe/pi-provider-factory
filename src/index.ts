@@ -13,14 +13,6 @@ import { factoryUsageProvider } from "./usage";
 const FORCED_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 let lastForcedRefreshAt = 0;
 
-type RuntimeUsageStorage = {
-  setRuntimeUsageProvider?(providerId: string, provider: typeof factoryUsageProvider): void;
-};
-
-type FactorySessionContext = {
-  modelRegistry?: { authStorage?: RuntimeUsageStorage };
-  session?: { modelRegistry?: { authStorage?: RuntimeUsageStorage } };
-};
 
 // Shared by both registrations below so routing/auth can never drift between
 // the static overlay and the discovery manager.
@@ -45,7 +37,6 @@ export default function registerFactoryProvider(pi: ExtensionAPI) {
     models: FACTORY_MODELS,
     streamSimple: factoryStreamSimple,
     usage: factoryUsageProvider,
-    usageProvider: factoryUsageProvider,
     oauth: {
       name: "Factory (Droid)",
       login,
@@ -60,11 +51,6 @@ export default function registerFactoryProvider(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", (_event, ctx) => {
-    const runtimeContext = ctx as unknown as FactorySessionContext;
-    const authStorage = runtimeContext.modelRegistry?.authStorage ?? runtimeContext.session?.modelRegistry?.authStorage;
-    if (authStorage?.setRuntimeUsageProvider) {
-      authStorage.setRuntimeUsageProvider(PROVIDER_ID, factoryUsageProvider);
-    }
 
     const now = Date.now();
     if (now - lastForcedRefreshAt < FORCED_REFRESH_INTERVAL_MS) return;

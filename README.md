@@ -11,11 +11,12 @@ This package registers a custom `factory` provider for [Oh My Pi](https://www.np
 Key features:
 
 - **Full Model Portfolio**: Access Claude Opus 5, GPT-5.6 Sol/Luna/Terra, Grok 4.6, GLM 5.3 / 5.3 Flash, Kimi K3, DeepSeek V4 Pro, and MiniMax M3 inside `omp`.
-- **Droid-Compatible OAuth**: Device login at `https://auth.factory.ai/device` with WorkOS token refresh and automatic organization derivation (`X-Factory-Org-Id`).
+- **Droid-Compatible Multi-Account OAuth**: Device login at `https://auth.factory.ai/device`, explicit organization selection, WorkOS token refresh, session-sticky OMP account routing, and automatic sibling failover after account quota/auth failures.
+- **Account-Isolated Routing**: Keeps each selected account's bearer, `X-Factory-Org-Id`, and validated regional endpoint together; credential endpoints must be HTTPS Factory API origins.
 - **Tri-Gateway Wire Routing**: Accurately routes to Factory's Anthropic (`/api/llm/a`), OpenAI Responses (`/api/llm/o/v1/responses`), and Fireworks (`/api/llm/o/v1/chat/completions`) endpoints.
 - **Native Tool Normalization & Wire Healing**: Converts tool calls and message history into Droid PascalCase primitives (`Read`, `Execute`, `Grep`, `Glob`, `LS`), and uses real-time stream markup healing to parse in-band reasoning and XML tool calls cleanly.
 - **Reasoning & Adaptive Thinking**: Supports Anthropic adaptive thinking for Claude Opus/Fable 5, effort ladders (`minimal` to `max`/`xhigh`), and preserves reasoning history across multi-turn tool loops for Fireworks-hosted models (`interleaved` for DeepSeek, `preserved` for GLM/Kimi).
-- **Real-Time Quota Tracking**: Query live billing limits and credit balances with `/usage`.
+- **Real-Time Quota Tracking**: Query live Standard/Core billing limits and credit balances with `/usage`, with optional exhausted-account preflight failover.
 
 ---
 
@@ -107,6 +108,10 @@ https://auth.factory.ai/device
 
 After successful login, the extension stores refreshable OAuth credentials through Oh My Pi's normal provider auth storage.
 
+If an account belongs to multiple Factory organizations, login asks which organization to add. Run `/login factory` again to add another organization; OMP stores different organization IDs as separate Factory OAuth accounts and keeps each session sticky to its selected account.
+
+OAuth login and refresh requests are cancellable and bounded. Region metadata returned by Factory is accepted only when it resolves to an HTTPS `api[.<region>].factory.ai` origin. Use the explicit `FACTORY_API_BASE` override for intentional local or custom proxies.
+
 ### Factory API key
 
 You can use a Factory API key by setting `FACTORY_API_KEY`:
@@ -135,7 +140,20 @@ Queries use the same base-URL precedence as model routing (`FACTORY_API_BASE`, t
 
 The billing-limits endpoint is queried with OAuth credentials only. Factory `fk-...` API keys are intentionally never sent to it (a live probe returns `401`), so with only `FACTORY_API_KEY` configured, model calls still work but `/usage` shows no Factory billing limits by design.
 
-Usage-provider registration for extensions requires an Oh My Pi release that includes it; on older releases Factory simply does not appear in `/usage` while model routing is unaffected.
+Native Factory `/usage` integration requires OMP 17.4.1 or newer; this package declares that minimum peer version.
+
+### Optional exhausted-account preflight
+
+Set `FACTORY_QUOTA_PREFLIGHT=1` (or `true`) to check the selected OAuth account's cached Factory billing limits before starting a model request. If the relevant quota tier is explicitly exhausted, the plugin returns a replay-safe usage-limit result before any model content is emitted, allowing OMP's existing retry resolver to select a sibling Factory account.
+
+- Standard quota: Claude, GPT/Codex, and Grok.
+- Droid Core quota: GLM, Kimi, DeepSeek, MiniMax, Nemotron, and Inkling.
+- Reports are cached for 30 seconds per normalized endpoint and organization, with concurrent checks sharing one fetch.
+- Warning, unknown, malformed, timed-out, and unavailable usage data fail open and send the real model request.
+- Accounts with Factory Extra Usage enabled are not preflight-blocked.
+- Raw `FACTORY_API_KEY` requests are never preflighted because Factory's billing endpoint is OAuth-only.
+
+This is a plugin-only exhausted-account failover, not proactive balancing: it does not rank healthy siblings by remaining percentage. The option is disabled by default, so normal request count and routing remain unchanged unless explicitly enabled.
 
 ### Organization and region handling
 
@@ -157,6 +175,7 @@ OAuth login and refresh support:
 | `FACTORY_API_BASE` | Overrides the Factory API base URL for every request, including OAuth-discovered endpoints. |
 | `FACTORY_ORG_ID` | Optional explicit Factory organization ID header value. |
 | `FACTORY_ORGANIZATION_ID` | Alias for `FACTORY_ORG_ID`. |
+| `FACTORY_QUOTA_PREFLIGHT` | Optional `1`/`true`: skip OAuth accounts whose relevant Standard/Core quota is explicitly exhausted. Disabled by default. |
 | `FACTORY_UPSTREAM_CLIENT_TYPE` | Optional override for `X-Factory-Client`; defaults to `cli`. |
 
 ## Usage examples
@@ -192,9 +211,9 @@ Factory's gateway enforces two critical invariants:
 The router accepts either:
 
 1. A raw bearer/API key string.
-2. An OAuth credential envelope containing `access`, `orgId`, and `apiEndpoint`.
+2. OMP's request-time OAuth envelope containing `token`, `orgId`, and `apiEndpoint`.
 
-Raw OAuth JWTs are decoded locally only to derive non-secret routing metadata such as Factory org ID. Tokens are not logged or printed by the extension.
+The envelope is generated from the selected stored account for each request. It never contains the refresh token. Raw OAuth JWTs are decoded locally only to derive non-secret routing metadata such as Factory org ID. Tokens are not logged or printed by the extension.
 
 ## Troubleshooting
 

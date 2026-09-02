@@ -164,6 +164,41 @@ describe("fetchFactoryDynamicModels", () => {
       Promise.resolve(new Response("<html>not markdown</html>", { status: 200 }))) as unknown as typeof fetch;
     await expect(fetchFactoryDynamicModels()).rejects.toThrow(/zero entries/);
   });
+  test("carries an abort signal on the docs request and rejects on timeout/abort", async () => {
+    let docsSignal: AbortSignal | null | undefined;
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("docs.factory.ai")) {
+        docsSignal = init?.signal;
+        const err = new Error("The operation was aborted");
+        err.name = "TimeoutError";
+        return Promise.reject(err);
+      }
+      return Promise.resolve(Response.json({ data: [] }));
+    }) as typeof fetch;
+
+    await expect(fetchFactoryDynamicModels()).rejects.toThrow();
+    expect(docsSignal).toBeDefined();
+    expect(docsSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  test("succeeds when OpenRouter pricing fetch fails", async () => {
+    const docs = `
+| Model | Model ID | Multiplier | Reasoning |
+| --- | --- | --- | --- |
+| Future Claude | \`claude-future\` | 1× | Standard |
+`;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("docs.factory.ai")) {
+        return new Response(docs, { status: 200 });
+      }
+      throw new Error("OpenRouter network error");
+    }) as typeof fetch;
+
+    const models = await fetchFactoryDynamicModels();
+    expect(models.some((model) => model.id === "claude-future")).toBe(true);
+  });
 
   test("uses conservative family limits for newly discovered model IDs", async () => {
     const docs = `
