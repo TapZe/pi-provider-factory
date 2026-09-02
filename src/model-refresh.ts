@@ -4,6 +4,16 @@ import { defaultCostFor, FACTORY_MODELS, factoryModel, familyOf } from "./catalo
 
 const FACTORY_MODEL_DOCS_URL = "https://docs.factory.ai/models.md";
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
+
+// Factory's public model table does not publish token limits. For a newly
+// discovered ID with no curated entry, use conservative family defaults until
+// its upstream and Droid-hosted limits have been audited explicitly.
+const DISCOVERED_MODEL_LIMITS = {
+  anthropic: { contextWindow: 200_000, maxTokens: 64_000 },
+  "openai-responses": { contextWindow: 400_000, maxTokens: 128_000 },
+  "openai-completions": { contextWindow: 200_000, maxTokens: 32_000 },
+} as const;
+
 const PROVIDER_PREFIXES = [
   "anthropic/",
   "openai/",
@@ -157,8 +167,7 @@ function docsEntryToModel(entry: FactoryModelDocsEntry, liveCost?: LiveTokenCost
         input: ["text", "image"],
         cost,
         premiumMultiplier: entry.multiplier,
-        contextWindow: 200000,
-        maxTokens: 64000,
+        ...DISCOVERED_MODEL_LIMITS.anthropic,
       });
     case "openai-responses":
       return factoryModel({
@@ -168,8 +177,7 @@ function docsEntryToModel(entry: FactoryModelDocsEntry, liveCost?: LiveTokenCost
         input: ["text", "image"],
         cost,
         premiumMultiplier: entry.multiplier,
-        contextWindow: 400000,
-        maxTokens: 128000,
+        ...DISCOVERED_MODEL_LIMITS["openai-responses"],
       });
     case "openai-completions":
       return factoryModel({
@@ -179,8 +187,7 @@ function docsEntryToModel(entry: FactoryModelDocsEntry, liveCost?: LiveTokenCost
         input: ["text"],
         cost,
         premiumMultiplier: entry.multiplier,
-        contextWindow: 200000,
-        maxTokens: 32000,
+        ...DISCOVERED_MODEL_LIMITS["openai-completions"],
       });
     case "unsupported":
       return null;

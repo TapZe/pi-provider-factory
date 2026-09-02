@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { fetchFactoryDynamicModels, parseFactoryModelDocs } from "./model-refresh";
+import { FACTORY_MODELS } from "./catalog";
 
 // Replicates the live docs.factory.ai/models.md shape: section headings with
 // styled spans, header/separator rows, footnote daggers, and a section
@@ -28,6 +29,80 @@ const FIXTURE = `
 | Kimi K2.6 | \`kimi-k2.6\` | 0.4× | Standard |
 | Claude Opus 4.8 | \`claude-opus-4-8\` | 2× | Standard |
 `;
+
+const EXPECTED_LIMIT_GROUPS = [
+  [
+    1_000_000,
+    128_000,
+    [
+      "claude-fable-5",
+      "claude-opus-5",
+      "claude-opus-5-fast",
+      "claude-opus-4-8",
+      "claude-opus-4-8-fast",
+      "claude-opus-4-7",
+      "claude-opus-4-7-fast",
+      "claude-opus-4-6",
+      "claude-opus-4-6-fast",
+      "claude-sonnet-5",
+    ],
+  ],
+  [200_000, 64_000, ["claude-opus-4-5-20251101"]],
+  [1_000_000, 64_000, ["claude-sonnet-4-6"]],
+  [200_000, 32_000, ["claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001"]],
+  [
+    1_050_000,
+    128_000,
+    [
+      "gpt-5.6-sol",
+      "gpt-5.6-sol-fast",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.5-fast",
+      "gpt-5.5-pro",
+      "gpt-5.4",
+      "gpt-5.4-fast",
+    ],
+  ],
+  [
+    400_000,
+    128_000,
+    ["gpt-5.4-mini", "gpt-5.4-mini-fast", "gpt-5.3-codex", "gpt-5.3-codex-fast", "gpt-5.2"],
+  ],
+  [200_000, 63_356, ["grok-4.6", "grok-4.5"]],
+  [1_048_576, 32_768, ["inkling"]],
+  [1_040_000, 131_072, ["glm-5.3", "glm-5.2"]],
+  [1_048_576, 131_072, ["glm-5.3-flash"]],
+  [524_288, 131_072, ["glm-5.2-fast"]],
+  [200_000, 131_072, ["glm-5.1"]],
+  [204_800, 131_072, ["glm-5", "glm-4.7", "glm-4.6"]],
+  [262_144, 65_536, ["kimi-k3", "kimi-k2.7-code", "kimi-k2.6"]],
+  [262_144, 32_768, ["kimi-k2.5"]],
+  [1_040_000, 131_072, ["deepseek-v4-flash-0731", "deepseek-v4-pro"]],
+  [512_000, 64_000, ["minimax-m3"]],
+  [204_800, 64_000, ["minimax-m2.7", "minimax-m2.5"]],
+  [202_000, 65_536, ["nemotron-3-ultra"]],
+] as const;
+
+describe("Factory model token limits", () => {
+  test("covers every curated model exactly once", () => {
+    const expectedIds: string[] = EXPECTED_LIMIT_GROUPS.flatMap(([, , ids]) => [...ids]);
+    expect(new Set(expectedIds).size).toBe(expectedIds.length);
+    expect([...expectedIds].sort()).toEqual(FACTORY_MODELS.map((model) => model.id).sort());
+  });
+
+  test("uses audited total-context and synchronous-output limits", () => {
+    const modelsById = new Map(FACTORY_MODELS.map((model) => [model.id, model]));
+
+    for (const [contextWindow, maxTokens, ids] of EXPECTED_LIMIT_GROUPS) {
+      for (const id of ids) {
+        expect(modelsById.get(id)?.contextWindow, `${id} contextWindow`).toBe(contextWindow);
+        expect(modelsById.get(id)?.maxTokens, `${id} maxTokens`).toBe(maxTokens);
+      }
+    }
+  });
+});
 
 describe("parseFactoryModelDocs", () => {
   const entries = parseFactoryModelDocs(FIXTURE);
@@ -71,7 +146,7 @@ describe("parseFactoryModelDocs", () => {
   });
 });
 
-describe("fetchFactoryDynamicModels failure paths", () => {
+describe("fetchFactoryDynamicModels", () => {
   const originalFetch = globalThis.fetch;
 
   afterEach(() => {
@@ -88,6 +163,32 @@ describe("fetchFactoryDynamicModels failure paths", () => {
     globalThis.fetch = (() =>
       Promise.resolve(new Response("<html>not markdown</html>", { status: 200 }))) as unknown as typeof fetch;
     await expect(fetchFactoryDynamicModels()).rejects.toThrow(/zero entries/);
+  });
+
+  test("uses conservative family limits for newly discovered model IDs", async () => {
+    const docs = `
+| Model | Model ID | Multiplier | Reasoning |
+| --- | --- | --- | --- |
+| Future Claude | \`claude-future\` | 1× | Standard |
+| Future GPT | \`gpt-future\` | 1× | Standard |
+| Future Kimi | \`kimi-future\` | 1× | Standard |
+`;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      return url.includes("docs.factory.ai")
+        ? new Response(docs, { status: 200 })
+        : Response.json({ data: [] });
+    }) as typeof fetch;
+
+    const models = await fetchFactoryDynamicModels();
+    const limitsFor = (id: string) => {
+      const model = models.find((candidate) => candidate.id === id);
+      return model ? [model.contextWindow, model.maxTokens] : undefined;
+    };
+
+    expect(limitsFor("claude-future")).toEqual([200_000, 64_000]);
+    expect(limitsFor("gpt-future")).toEqual([400_000, 128_000]);
+    expect(limitsFor("kimi-future")).toEqual([200_000, 32_000]);
   });
 });
 
