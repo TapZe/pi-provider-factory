@@ -236,13 +236,20 @@ function buildCompletionCompatibility(
   };
 }
 
+
 function buildFactoryTargetModel(
   model: Model<Api>,
   targetApi: FactoryTargetApi,
   orgId: string | null,
   apiEndpoint: string,
+  useClaudeThinkingInference: boolean,
 ): Model<FactoryTargetApi> {
-  const thinking = factoryThinkingFor(model.id, model.reasoning, model.thinking);
+  // Claude's Anthropic wire protocol changes by model generation. Leaving the
+  // target unset lets pi-catalog select adaptive, budget-effort, or budget from
+  // the Claude ID instead of reusing the custom provider's generic effort mode.
+  const explicitThinking = useClaudeThinkingInference
+    ? undefined
+    : factoryThinkingFor(model.id, model.reasoning, model.thinking);
   const spec: ModelSpec<FactoryTargetApi> = {
     provider: PROVIDER_ID,
     id: model.id,
@@ -251,7 +258,7 @@ function buildFactoryTargetModel(
     baseUrl:
       targetApi === "anthropic-messages" ? `${apiEndpoint}/api/llm/a` : `${apiEndpoint}/api/llm/o/v1`,
     reasoning: model.reasoning,
-    thinking,
+    thinking: explicitThinking,
     supportsTools: true,
     compat: buildCompletionCompatibility(model.id, targetApi),
     input: model.input,
@@ -263,8 +270,8 @@ function buildFactoryTargetModel(
   };
 
   const target = Object.assign(buildModel(spec), { identity: identityFor(model.id) });
-  if (thinking) {
-    target.thinking = thinking;
+  if (explicitThinking) {
+    target.thinking = explicitThinking;
   }
   return target;
 }
@@ -285,7 +292,14 @@ export const factoryStreamSimple: NonNullable<ProviderConfig["streamSimple"]> = 
 
   try {
     const apiEndpoint = resolveFactoryApiBase(credential.apiEndpoint);
-    const target = buildFactoryTargetModel(model, targetApi, credential.orgId ?? FACTORY_ORG_ID, apiEndpoint);
+    const useClaudeThinkingInference = targetApi === "anthropic-messages" && model.id.startsWith("claude-");
+    const target = buildFactoryTargetModel(
+      model,
+      targetApi,
+      credential.orgId ?? FACTORY_ORG_ID,
+      apiEndpoint,
+      useClaudeThinkingInference,
+    );
 
     const routedContext = prepareContextForFactory(context);
     const hasTools = (routedContext.tools?.length ?? 0) > 0;
@@ -294,6 +308,14 @@ export const factoryStreamSimple: NonNullable<ProviderConfig["streamSimple"]> = 
 
     const inner = streamSimple(target, routedContext, {
       ...options,
+      ...(useClaudeThinkingInference
+        ? {
+            thinkingBudgets: {
+              [Effort.High]: 24_576,
+              ...(options?.thinkingBudgets ?? {}),
+            },
+          }
+        : {}),
       reasoning: resolvedReasoning,
       toolChoice: resolvedToolChoice,
       apiKey: credential.access,

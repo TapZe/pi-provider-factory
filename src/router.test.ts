@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { AssistantMessage, Context, ToolCall } from "@oh-my-pi/pi-ai";
+import { Effort, type AssistantMessage, type Context, type ToolCall } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { StreamMarkupHealing } from "@oh-my-pi/pi-ai/utils/stream-markup-healing";
 import { ANTHROPIC_BETAS, FACTORY_CLIENT_VERSION, FACTORY_DROID_SYSTEM_PROMPT } from "./constants";
@@ -138,6 +138,69 @@ async function captureFactoryCoreRequest(modelId: string): Promise<CapturedFacto
   return { body: requestBody, apiProvider };
 }
 
+type CapturedFactoryAnthropicRequest = {
+  body: Record<string, unknown>;
+  betaHeader: string | null;
+};
+
+async function captureFactoryAnthropicRequest(
+  modelId: string,
+  reasoning: Effort,
+): Promise<CapturedFactoryAnthropicRequest> {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | undefined;
+  let betaHeader: string | null | undefined;
+
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+    const [input, init] = args;
+    const request = input instanceof Request ? input : new Request(typeof input === "string" ? input : input.toString(), init);
+    requestBody = (await request.json()) as Record<string, unknown>;
+    betaHeader = request.headers.get("anthropic-beta");
+
+    return new Response(
+      [
+        'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_factory","type":"message","role":"assistant","model":"echo","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n\n',
+        'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n',
+        'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}\n\n',
+        'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n',
+        'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}\n\n',
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+      ].join(""),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    const stream = factoryStreamSimple(
+      testFactoryModel(modelId),
+      {
+        systemPrompt: [],
+        messages: [{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: 0 }],
+        tools: [READ_TOOL],
+      },
+      {
+        apiKey: JSON.stringify({
+          access: "test-factory-oauth-token",
+          orgId: "test-org",
+          apiEndpoint: "http://factory.test",
+        }),
+        reasoning,
+        sessionId: "test-session",
+      },
+    );
+
+    await stream.result();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  if (!requestBody || betaHeader === undefined) {
+    throw new Error("Factory Anthropic request was not captured");
+  }
+
+  return { body: requestBody, betaHeader };
+}
+
 describe("Factory Router & Tool Execution Configuration", () => {
   it("uses the latest Droid CLI client version", () => {
     expect(FACTORY_CLIENT_VERSION).toBe("0.208.2");
@@ -146,6 +209,34 @@ describe("Factory Router & Tool Execution Configuration", () => {
   it("includes required Anthropic betas for tool streaming and thinking", () => {
     expect(ANTHROPIC_BETAS).toContain("fine-grained-tool-streaming-2025-05-14");
     expect(ANTHROPIC_BETAS).toContain("interleaved-thinking-2025-05-14");
+  });
+
+  it("uses Droid-compatible adaptive thinking for current Claude models", async () => {
+    const adaptiveModels = ["claude-fable-5", "claude-opus-5", "claude-opus-4-8"];
+
+    for (const modelId of adaptiveModels) {
+      const { body, betaHeader } = await captureFactoryAnthropicRequest(modelId, Effort.Medium);
+
+      expect(body.thinking).toEqual({ type: "adaptive", display: "summarized" });
+      expect(body.output_config).toEqual({ effort: "high" });
+      expect(betaHeader).toContain("effort-2025-11-24");
+    }
+  });
+
+  it("selects Claude generation-specific thinking without changing MiniMax", async () => {
+    const sonnet = await captureFactoryAnthropicRequest("claude-sonnet-4-6", Effort.High);
+    expect(sonnet.body.thinking).toEqual({ type: "adaptive" });
+    expect(sonnet.body.output_config).toEqual({ effort: "high" });
+
+    const opus45 = await captureFactoryAnthropicRequest("claude-opus-4-5-20251101", Effort.High);
+    expect(opus45.body.thinking).toMatchObject({ type: "enabled", budget_tokens: 24_576 });
+    // pi-ai 16.1.x exposes budget-effort as enabled thinking through the
+    // generic streamSimple path but does not forward output_config.effort.
+    expect(opus45.body.output_config).toBeUndefined();
+
+    const minimax = await captureFactoryAnthropicRequest("minimax-m3", Effort.High);
+    expect(minimax.body.thinking).toMatchObject({ type: "enabled" });
+    expect(minimax.body.output_config).toBeUndefined();
   });
 
   it("contains the Droid system prompt prefix enforcing tool usage", () => {
