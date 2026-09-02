@@ -28,25 +28,16 @@ export interface FactoryIdentity {
 }
 
 export function formatErrorDetails(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return String(error);
-  }
+  if (!(error instanceof Error)) return String(error).slice(0, 500);
 
-  const details = [`${error.name}: ${error.message}`];
+  const sanitizedMessage = error.message
+    .replace(/(bearer\s+)[^\s,;]+/gi, "$1[redacted]")
+    .replace(/((?:access|refresh)[_-]?token[\s=:"']+)[^\s,;}"']+/gi, "$1[redacted]")
+    .slice(0, 500);
+  const details = [`${error.name}: ${sanitizedMessage}`];
   const errorWithCode: Error & { code?: string; errno?: number | string } = error;
-
-  if (errorWithCode.code) {
-    details.push(`code=${errorWithCode.code}`);
-  }
-
-  if (typeof errorWithCode.errno !== "undefined") {
-    details.push(`errno=${String(errorWithCode.errno)}`);
-  }
-
-  if (typeof error.cause !== "undefined") {
-    details.push(`cause=${formatErrorDetails(error.cause)}`);
-  }
-
+  if (errorWithCode.code) details.push(`code=${errorWithCode.code}`);
+  if (typeof errorWithCode.errno !== "undefined") details.push(`errno=${String(errorWithCode.errno)}`);
   return details.join("; ");
 }
 
@@ -119,18 +110,25 @@ export function parseTokenResponse(
   };
 }
 
-export function firstOrganizationId(value: unknown): string | undefined {
+export function parseUniqueOrganizationIds(value: unknown): string[] {
   if (!isRecord(value) || !Array.isArray(value.workosOrgIds)) {
-    return undefined;
+    return [];
   }
 
+  const seen = new Set<string>();
+  const result: string[] = [];
+
   for (const organizationId of value.workosOrgIds) {
-    if (typeof organizationId === "string" && organizationId.length > 0) {
-      return organizationId;
+    if (typeof organizationId === "string") {
+      const trimmed = organizationId.trim();
+      if (trimmed.length > 0 && !seen.has(trimmed)) {
+        seen.add(trimmed);
+        result.push(trimmed);
+      }
     }
   }
 
-  return undefined;
+  return result;
 }
 
 export function identityFromWhoami(value: unknown): FactoryIdentity {
@@ -147,15 +145,55 @@ export function identityFromWhoami(value: unknown): FactoryIdentity {
   };
 }
 
-export async function readJsonResponse(response: Response, label: string): Promise<unknown> {
-  const responseBody = await response.text();
-  if (!response.ok) {
-    throw new Error(`Factory OAuth ${label} request failed. status=${response.status}; body=${responseBody}`);
+const MAX_OAUTH_RESPONSE_BYTES = 64 * 1024;
+const SAFE_ERROR_CODE = /^[a-z0-9_.:-]{1,80}$/i;
+
+async function readBoundedResponseText(response: Response, label: string): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let receivedBytes = 0;
+  let text = "";
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    receivedBytes += chunk.value.byteLength;
+    if (receivedBytes > MAX_OAUTH_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new Error(`Factory OAuth ${label} response exceeded ${MAX_OAUTH_RESPONSE_BYTES} bytes`);
+    }
+    text += decoder.decode(chunk.value, { stream: true });
   }
 
+  return text + decoder.decode();
+}
+
+export function oauthErrorCodeFromResponse(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const code = firstStringField(value, ["error", "code", "type"]);
+  return code && SAFE_ERROR_CODE.test(code) ? code : undefined;
+}
+
+export async function readJsonResponseBody(response: Response, label: string): Promise<unknown> {
+  const responseBody = await readBoundedResponseText(response, label);
   try {
     return JSON.parse(responseBody);
   } catch (error) {
+    if (!response.ok) {
+      throw new Error(`Factory OAuth ${label} request failed. status=${response.status}`);
+    }
     throw new Error(`Factory OAuth ${label} returned invalid JSON: ${formatErrorDetails(error)}`);
   }
+}
+
+export async function readJsonResponse(response: Response, label: string): Promise<unknown> {
+  const parsed = await readJsonResponseBody(response, label);
+  if (!response.ok) {
+    const code = oauthErrorCodeFromResponse(parsed);
+    throw new Error(
+      `Factory OAuth ${label} request failed. status=${response.status}${code ? `; code=${code}` : ""}`,
+    );
+  }
+  return parsed;
 }

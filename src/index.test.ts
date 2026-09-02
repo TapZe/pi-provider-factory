@@ -48,11 +48,9 @@ describe("registerFactoryProvider", () => {
   test("only the first registration owns streaming, usage, and OAuth", () => {
     expect(recorded[0]?.config.streamSimple).toBeDefined();
     expect(recorded[0]?.config.usage).toBeDefined();
-    expect(recorded[0]?.config.usageProvider).toBeDefined();
     expect(recorded[0]?.config.oauth).toBeDefined();
     expect(recorded[1]?.config.streamSimple).toBeUndefined();
     expect(recorded[1]?.config.usage).toBeUndefined();
-    expect(recorded[1]?.config.usageProvider).toBeUndefined();
     expect(recorded[1]?.config.oauth).toBeUndefined();
   });
 
@@ -62,6 +60,33 @@ describe("registerFactoryProvider", () => {
     expect(staticConfig?.baseUrl).toBe(discoveryConfig?.baseUrl);
     expect(staticConfig?.apiKey).toBe(discoveryConfig?.apiKey);
     expect(staticConfig?.headers).toBe(discoveryConfig?.headers);
+  });
+});
+
+describe("Factory native usage registration", () => {
+  test("installed supported OMP registers the Factory usage provider", async () => {
+    const staticConfig = recordRegistrations()[0]!.config;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "factory-usage-registration-"));
+    const authStorage = await AuthStorage.create(path.join(dir, "auth.db"));
+    try {
+      const registry = new ModelRegistry(authStorage, path.join(dir, "models.yml"));
+      registry.registerProvider(
+        PROVIDER_ID,
+        {
+          api: staticConfig.api,
+          baseUrl: staticConfig.baseUrl,
+          apiKey: "test-key",
+          models: staticConfig.models,
+          usage: staticConfig.usage,
+        },
+        "factory-usage-registration-test",
+      );
+
+      expect(authStorage.usageProviderFor(PROVIDER_ID)?.id).toBe(PROVIDER_ID);
+    } finally {
+      authStorage.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
