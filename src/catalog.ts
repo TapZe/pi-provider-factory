@@ -82,6 +82,11 @@ export function defaultCostFor(id: string): ProviderModelConfig["cost"] {
     return { input: 1.75, output: 14.0, cacheRead: 0.175, cacheWrite: 0 };
   }
 
+  // Grok family
+  if (id.startsWith("grok-")) {
+    return { input: 2.0, output: 10.0, cacheRead: 0.5, cacheWrite: 0 };
+  }
+
   // Core Open Models (Fireworks / Standard host rates)
   if (id === "inkling" || id.startsWith("inkling-")) {
     return { input: 1.0, output: 3.0, cacheRead: 0.1, cacheWrite: 0 };
@@ -396,6 +401,26 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     premiumMultiplier: 0.28,
   }),
 
+  // Grok family (routed through OpenAI Responses gateway with x-api-provider: xai)
+  factoryModel({
+    id: "grok-4.6",
+    name: "Grok 4.6 (Factory)",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 200000,
+    maxTokens: 63356,
+    premiumMultiplier: 0.8,
+  }),
+  factoryModel({
+    id: "grok-4.5",
+    name: "Grok 4.5 (Factory)",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 200000,
+    maxTokens: 63356,
+    premiumMultiplier: 0.8,
+  }),
+
   // Factory Core and open-weight chat models
   factoryModel({
     id: "inkling",
@@ -414,6 +439,15 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     contextWindow: 1040000,
     maxTokens: 131072,
     premiumMultiplier: 0.56,
+  }),
+  factoryModel({
+    id: "glm-5.3-flash",
+    name: "GLM 5.3 Flash (Factory Core)",
+    reasoning: true,
+    input: ["text"],
+    contextWindow: 1040000,
+    maxTokens: 131072,
+    premiumMultiplier: 0.38,
   }),
   factoryModel({
     id: "glm-5.2",
@@ -441,6 +475,33 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     contextWindow: 190000,
     maxTokens: 131072,
     premiumMultiplier: 0.55,
+  }),
+  factoryModel({
+    id: "glm-5",
+    name: "GLM 5 (Factory Core)",
+    reasoning: true,
+    input: ["text"],
+    contextWindow: 190000,
+    maxTokens: 32000,
+    premiumMultiplier: 0.55,
+  }),
+  factoryModel({
+    id: "glm-4.7",
+    name: "GLM 4.7 (Factory Core)",
+    reasoning: true,
+    input: ["text"],
+    contextWindow: 198000,
+    maxTokens: 25344,
+    premiumMultiplier: 0.4,
+  }),
+  factoryModel({
+    id: "glm-4.6",
+    name: "GLM 4.6 (Factory Core)",
+    reasoning: true,
+    input: ["text"],
+    contextWindow: 200000,
+    maxTokens: 128000,
+    premiumMultiplier: 0.25,
   }),
   factoryModel({
     id: "kimi-k3",
@@ -539,7 +600,7 @@ export function familyOf(id: string): FactoryModelFamily {
     return "anthropic";
   }
 
-  if (id.startsWith("gpt-") || id.endsWith("-codex")) {
+  if (id.startsWith("gpt-") || id.endsWith("-codex") || id.startsWith("grok-")) {
     return "openai-responses";
   }
 
@@ -557,12 +618,12 @@ export function familyOf(id: string): FactoryModelFamily {
   return "unsupported";
 }
 
-export type FactoryUpstreamProvider = "anthropic" | "openai" | "fireworks";
+export type FactoryUpstreamProvider = "anthropic" | "openai" | "fireworks" | "xai";
 
 // Factory's `x-api-provider` request header names the UPSTREAM the gateway routes
 // to, independent of the wire API shape. Droid Core open models (GLM, Kimi,
 // DeepSeek, MiniMax, Nemotron, Inkling) all resolve to "fireworks" — even MiniMax,
-// which is served over the Anthropic-compatible API.
+// which is served over the Anthropic-compatible API. Grok routes to direct "xai".
 export function upstreamProviderFor(id: string): FactoryUpstreamProvider {
   if (id.startsWith("claude-") || id.startsWith("atlas-") || id.startsWith("aster-")) {
     return "anthropic";
@@ -571,5 +632,10 @@ export function upstreamProviderFor(id: string): FactoryUpstreamProvider {
   if (id.startsWith("gpt-") || id.endsWith("-codex")) {
     return "openai";
   }
+
+  if (id.startsWith("grok-")) {
+    return "xai";
+  }
+
   return "fireworks";
 }
