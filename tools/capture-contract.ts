@@ -353,6 +353,20 @@ function diffSnapshots(oldSnap: Snapshot, newSnap: Snapshot): string[] {
 	return changes;
 }
 
+function compareDroidSnapshotVersions(left: string, right: string): number {
+	const parseVersion = (filename: string) =>
+		filename.replace(/^droid-/, "").replace(/\.json$/, "").split(".").map(Number);
+	const leftParts = parseVersion(left);
+	const rightParts = parseVersion(right);
+
+	for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index++) {
+		const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+		if (difference !== 0) return difference;
+	}
+
+	return 0;
+}
+
 function loadSnapshot(ref: string): Snapshot {
 	// Explicit paths (absolute or cwd-relative) resolve as given; bare
 	// filenames and version strings resolve inside the snapshot dir.
@@ -566,16 +580,7 @@ async function main(): Promise<void> {
 				.filter(
 					f => f.startsWith("droid-") && f.endsWith(".json") && !f.endsWith(".verify.json") && f !== `droid-${version}.json`,
 				)
-				.sort((a, b) => {
-					const parse = (f: string) => f.replace(/^droid-/, "").replace(/\.json$/, "").split(".").map(Number);
-					const pa = parse(a);
-					const pb = parse(b);
-					for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-						const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
-						if (diff !== 0) return diff;
-					}
-					return 0;
-				})
+				.sort(compareDroidSnapshotVersions)
 		: [];
 
 	// existingSnapshot is null unless the file was a COMPLETE same-version

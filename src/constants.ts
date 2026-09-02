@@ -24,6 +24,10 @@ export const FACTORY_ORG_ID = factoryOrgId && factoryOrgId.length > 0 ? factoryO
 export const ANTHROPIC_BASE = `${FACTORY_API}/api/llm/a`;
 export const OPENAI_BASE = `${FACTORY_API}/api/llm/o/v1`;
 
+export function resolveFactoryApiBase(apiEndpoint?: string | null): string {
+  return FACTORY_API_BASE_OVERRIDDEN ? FACTORY_API : apiEndpoint ?? FACTORY_API;
+}
+
 export function factoryApiForRegion(region: string | undefined): string {
   if (!region || region === "global") {
     return FACTORY_API;

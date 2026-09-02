@@ -4,110 +4,26 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import type { Api, Model, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import { createProviderErrorMessage } from "@oh-my-pi/pi-ai/providers/error-message";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { streamSimple, type AssistantMessage, type Context, type StreamOptions } from "@oh-my-pi/pi-ai";
+import { streamSimple, type AssistantMessage, type Context } from "@oh-my-pi/pi-ai";
 
-import { FACTORY_EFFORTS, familyOf, identityFor, upstreamProviderFor } from "./catalog";
-import { factoryStreamMarkupHealingPattern, normalizeFactoryToolCallStream } from "./tool-call-normalization";
+import { factoryThinkingFor, familyOf, identityFor, upstreamProviderFor } from "./catalog";
 import {
   ANTHROPIC_BETAS,
   ANTHROPIC_VERSION,
-  FACTORY_API,
   FACTORY_API_BASE_OVERRIDDEN,
   FACTORY_HEADERS,
   FACTORY_OPENAI_PLATFORM_ORG,
   FACTORY_ORG_ID,
   FACTORY_DROID_SYSTEM_PROMPT,
   PROVIDER_ID,
+  resolveFactoryApiBase,
 } from "./constants";
+import { parseFactoryCredential, type ParsedFactoryCredential } from "./credential";
+import { isRecord } from "./object-fields";
+import { factoryStreamMarkupHealingPattern, normalizeFactoryToolCallStream } from "./tool-call-normalization";
 
 type FactoryTargetApi = "anthropic-messages" | "openai-responses" | "openai-completions";
 
-type ParsedCredential = {
-  access?: string;
-  orgId: string | null;
-  apiEndpoint: string | null;
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function stringField(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function firstStringField(record: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = stringField(record, key);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return undefined;
-}
-
-function decodeBase64Url(segment: string): string {
-  const base64 = segment.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = `${base64}${"=".repeat((4 - (base64.length % 4)) % 4)}`;
-
-  return atob(padded);
-}
-
-function orgIdFromAccessToken(accessToken: string): string | null {
-  const [, payloadSegment] = accessToken.split(".");
-
-  if (!payloadSegment) {
-    return null;
-  }
-
-  try {
-    const payload: unknown = JSON.parse(decodeBase64Url(payloadSegment));
-
-    if (!isRecord(payload)) {
-      return null;
-    }
-
-    return (
-      firstStringField(payload, ["external_org_id", "org_id", "organization_id", "organizationId", "orgId"]) ?? null
-    );
-  } catch {
-    return null;
-  }
-}
-
-function parseCredential(raw: string | undefined): ParsedCredential {
-  if (!raw) {
-    return { orgId: null, apiEndpoint: null };
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(raw);
-
-    if (isRecord(parsed) && typeof parsed.access === "string" && parsed.access.length > 0) {
-      const parsedOrgId = typeof parsed.orgId === "string" && parsed.orgId.length > 0 ? parsed.orgId : null;
-
-      return {
-        access: parsed.access,
-        orgId: parsedOrgId ?? orgIdFromAccessToken(parsed.access),
-        apiEndpoint: typeof parsed.apiEndpoint === "string" && parsed.apiEndpoint.length > 0 ? parsed.apiEndpoint : null,
-      };
-    }
-  } catch {
-    return {
-      access: raw,
-      orgId: orgIdFromAccessToken(raw),
-      apiEndpoint: null,
-    };
-  }
-  return {
-    access: raw,
-    orgId: orgIdFromAccessToken(raw),
-    apiEndpoint: null,
-  };
-}
 
 function errorStream(model: Model<Api>, message: string): AssistantMessageEventStream {
   const stream = new AssistantMessageEventStream();
@@ -120,7 +36,7 @@ function errorStream(model: Model<Api>, message: string): AssistantMessageEventS
 type FactoryDiagnosticArgs = {
   model: Model<Api>;
   targetApi: FactoryTargetApi;
-  credential: ParsedCredential;
+  credential: ParsedFactoryCredential;
   apiEndpoint: string;
 };
 
@@ -225,11 +141,9 @@ function routeWithFactoryDiagnostics(
   return outer;
 }
 
-
-function targetApiFor(modelId: string): FactoryTargetApi | null {
-  // MiniMax is a Droid Core (open) model, but Factory serves it through the
-  // Anthropic-compatible endpoint (observed in droid 0.153.1), not the OpenAI
-  // chat-completions endpoint used by the other open models.
+function resolveTargetApi(modelId: string): FactoryTargetApi | null {
+  // MiniMax is a Droid Core model, but Factory serves it through the
+  // Anthropic-compatible endpoint rather than chat completions.
   if (modelId.startsWith("minimax-")) {
     return "anthropic-messages";
   }
@@ -257,12 +171,9 @@ function buildRequestHeaders(options: Parameters<NonNullable<ProviderConfig["str
   };
 }
 
-
-
-function clampReasoningEffort(effort: Effort | undefined, _modelId: string): Effort | undefined {
-  if (!effort) return undefined;
-  if ((effort as string) === "off" || (effort as string) === "none") return undefined;
-  return effort;
+function normalizeReasoningEffort(effort: Effort | undefined): Effort | undefined {
+  const effortName = effort as string | undefined;
+  return !effortName || effortName === "off" || effortName === "none" ? undefined : effort;
 }
 
 // Factory's gateway requires requests to carry Droid's system prompt prefix
@@ -270,8 +181,8 @@ function clampReasoningEffort(effort: Effort | undefined, _modelId: string): Eff
 // Requests missing this prefix or with system stripped return 403 Forbidden.
 export function prepareContextForFactory(context: Context): Context {
   const existingPrompts = context.systemPrompt?.filter((part) => part.length > 0) ?? [];
-  const alreadyHasDroidPrefix = existingPrompts.some((p) =>
-    p.includes("You are Droid, an AI software engineering agent built by Factory"),
+  const alreadyHasDroidPrefix = existingPrompts.some((prompt) =>
+    prompt.includes("You are Droid, an AI software engineering agent built by Factory"),
   );
 
   return {
@@ -280,17 +191,13 @@ export function prepareContextForFactory(context: Context): Context {
   };
 }
 
-function buildTargetModel(
-  model: Model<Api>,
-  targetApi: FactoryTargetApi,
-  orgId: string | null,
-  apiEndpoint: string,
-): Model<FactoryTargetApi> {
-  const isAnthropic = targetApi === "anthropic-messages";
-  const baseUrl = isAnthropic ? `${apiEndpoint}/api/llm/a` : `${apiEndpoint}/api/llm/o/v1`;
-  const headers: Record<string, string> = { ...FACTORY_HEADERS, "x-api-provider": upstreamProviderFor(model.id) };
+function buildTargetHeaders(modelId: string, targetApi: FactoryTargetApi, orgId: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
+    ...FACTORY_HEADERS,
+    "x-api-provider": upstreamProviderFor(modelId),
+  };
 
-  if (isAnthropic) {
+  if (targetApi === "anthropic-messages") {
     headers["anthropic-version"] = ANTHROPIC_VERSION;
     headers["anthropic-beta"] = ANTHROPIC_BETAS;
   }
@@ -303,95 +210,87 @@ function buildTargetModel(
     headers["X-Factory-Org-Id"] = orgId;
   }
 
-  const isDeepseek = model.id.startsWith("deepseek-");
-  const isKimi = model.id.startsWith("kimi-");
-  const markupPattern = factoryStreamMarkupHealingPattern(model.id);
+  return headers;
+}
 
-  const compat: ModelSpec<FactoryTargetApi>["compat"] =
-    targetApi === "openai-completions"
-      ? {
-          extraBody: {
-            reasoning_history: isDeepseek ? "interleaved" : "preserved",
-          },
-          streamMarkupHealingPattern: markupPattern,
-          stripDeepseekSpecialTokens: isDeepseek,
-          requiresToolResultName: isKimi,
-          requiresReasoningContentForToolCalls: true,
-          requiresReasoningContentForAllAssistantTurns: isDeepseek,
-          allowsSyntheticReasoningContentForToolCalls: !isDeepseek,
-          requiresAssistantContentForToolCalls: true,
-        }
-      : undefined;
+function buildCompletionCompatibility(
+  modelId: string,
+  targetApi: FactoryTargetApi,
+): ModelSpec<FactoryTargetApi>["compat"] {
+  if (targetApi !== "openai-completions") {
+    return undefined;
+  }
 
-  const isXHighCapable =
-    model.id === "grok-4.6" ||
-    model.id.startsWith("gpt-5.6") ||
-    model.id.startsWith("glm-5.3") ||
-    model.id.startsWith("claude-opus-5") ||
-    model.id.startsWith("claude-fable-5");
-  const defaultEffortMap: Record<string, string> = isXHighCapable
-    ? { minimal: "low", max: "xhigh" }
-    : { minimal: "low", xhigh: "high", max: "high" };
+  const isDeepseek = modelId.startsWith("deepseek-");
+  return {
+    extraBody: {
+      reasoning_history: isDeepseek ? "interleaved" : "preserved",
+    },
+    streamMarkupHealingPattern: factoryStreamMarkupHealingPattern(modelId),
+    stripDeepseekSpecialTokens: isDeepseek,
+    requiresToolResultName: modelId.startsWith("kimi-"),
+    requiresReasoningContentForToolCalls: true,
+    requiresReasoningContentForAllAssistantTurns: isDeepseek,
+    allowsSyntheticReasoningContentForToolCalls: !isDeepseek,
+    requiresAssistantContentForToolCalls: true,
+  };
+}
 
-  const thinking =
-    model.thinking ??
-    (model.reasoning
-      ? {
-          mode: "effort",
-          efforts: FACTORY_EFFORTS,
-          defaultLevel: Effort.High,
-          effortMap: defaultEffortMap,
-        }
-      : undefined);
-
+function buildFactoryTargetModel(
+  model: Model<Api>,
+  targetApi: FactoryTargetApi,
+  orgId: string | null,
+  apiEndpoint: string,
+): Model<FactoryTargetApi> {
+  const thinking = factoryThinkingFor(model.id, model.reasoning, model.thinking);
   const spec: ModelSpec<FactoryTargetApi> = {
     provider: PROVIDER_ID,
     id: model.id,
     name: model.name,
     api: targetApi,
-    baseUrl,
+    baseUrl:
+      targetApi === "anthropic-messages" ? `${apiEndpoint}/api/llm/a` : `${apiEndpoint}/api/llm/o/v1`,
     reasoning: model.reasoning,
     thinking,
     supportsTools: true,
-    compat,
+    compat: buildCompletionCompatibility(model.id, targetApi),
     input: model.input,
     cost: model.cost,
     premiumMultiplier: model.premiumMultiplier,
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
-    headers,
+    headers: buildTargetHeaders(model.id, targetApi, orgId),
   };
 
-  const target = buildModel(spec);
-  (target as any).identity = identityFor(model.id);
+  const target = Object.assign(buildModel(spec), { identity: identityFor(model.id) });
   if (thinking) {
-    target.thinking = thinking as any;
+    target.thinking = thinking;
   }
   return target;
 }
 
 export const factoryStreamSimple: NonNullable<ProviderConfig["streamSimple"]> = (model, context, options) => {
   const rawApiKey = typeof options?.apiKey === "string" ? options.apiKey : undefined;
-  const credential = parseCredential(rawApiKey);
+  const credential = parseFactoryCredential(rawApiKey);
 
   if (!credential.access) {
     return errorStream(model, "factory: no Factory credential; run `/login factory`");
   }
 
-  const targetApi = targetApiFor(model.id);
+  const targetApi = resolveTargetApi(model.id);
 
   if (!targetApi) {
     return errorStream(model, `factory: model ${model.id} is not supported in v1 (Gemini/other)`);
   }
 
   try {
-    const apiEndpoint = FACTORY_API_BASE_OVERRIDDEN ? FACTORY_API : credential.apiEndpoint ?? FACTORY_API;
-    const target = buildTargetModel(model, targetApi, credential.orgId ?? FACTORY_ORG_ID, apiEndpoint);
+    const apiEndpoint = resolveFactoryApiBase(credential.apiEndpoint);
+    const target = buildFactoryTargetModel(model, targetApi, credential.orgId ?? FACTORY_ORG_ID, apiEndpoint);
 
     const routedContext = prepareContextForFactory(context);
-    const hasTools = (routedContext.tools && routedContext.tools.length > 0) ?? false;
+    const hasTools = (routedContext.tools?.length ?? 0) > 0;
     const resolvedToolChoice = options?.toolChoice ?? (hasTools ? "auto" : undefined);
-    const resolvedReasoning = clampReasoningEffort(options?.reasoning, model.id);
+    const resolvedReasoning = normalizeReasoningEffort(options?.reasoning);
 
     const inner = streamSimple(target, routedContext, {
       ...options,
