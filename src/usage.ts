@@ -7,7 +7,8 @@ import type {
   UsageStatus,
 } from "@oh-my-pi/pi-ai";
 
-import { FACTORY_API, FACTORY_API_BASE_OVERRIDDEN, FACTORY_HEADERS, PROVIDER_ID } from "./constants";
+import { FACTORY_HEADERS, PROVIDER_ID, resolveFactoryApiBase } from "./constants";
+import { isRecord } from "./object-fields";
 
 /**
  * Factory account/quota reporting for Oh My Pi's native `/usage`.
@@ -37,12 +38,52 @@ interface TierBucketSpec {
 
 /** Fixed emission order: all Standard windows, then all Droid Core windows. */
 const TIER_BUCKETS: readonly TierBucketSpec[] = [
-  { tier: "standard", payloadKey: "fiveHour", windowId: "5h", label: "Standard 5 Hour", windowLabel: "5 Hour", durationMs: FIVE_HOURS_MS },
-  { tier: "standard", payloadKey: "weekly", windowId: "weekly", label: "Standard Weekly", windowLabel: "Weekly", durationMs: WEEK_MS },
-  { tier: "standard", payloadKey: "monthly", windowId: "monthly", label: "Standard Monthly", windowLabel: "Monthly" },
-  { tier: "core", payloadKey: "fiveHour", windowId: "5h", label: "Droid Core 5 Hour", windowLabel: "5 Hour", durationMs: FIVE_HOURS_MS },
-  { tier: "core", payloadKey: "weekly", windowId: "weekly", label: "Droid Core Weekly", windowLabel: "Weekly", durationMs: WEEK_MS },
-  { tier: "core", payloadKey: "monthly", windowId: "monthly", label: "Droid Core Monthly", windowLabel: "Monthly" },
+  {
+    tier: "standard",
+    payloadKey: "fiveHour",
+    windowId: "5h",
+    label: "Standard 5 Hour",
+    windowLabel: "5 Hour",
+    durationMs: FIVE_HOURS_MS,
+  },
+  {
+    tier: "standard",
+    payloadKey: "weekly",
+    windowId: "weekly",
+    label: "Standard Weekly",
+    windowLabel: "Weekly",
+    durationMs: WEEK_MS,
+  },
+  {
+    tier: "standard",
+    payloadKey: "monthly",
+    windowId: "monthly",
+    label: "Standard Monthly",
+    windowLabel: "Monthly",
+  },
+  {
+    tier: "core",
+    payloadKey: "fiveHour",
+    windowId: "5h",
+    label: "Droid Core 5 Hour",
+    windowLabel: "5 Hour",
+    durationMs: FIVE_HOURS_MS,
+  },
+  {
+    tier: "core",
+    payloadKey: "weekly",
+    windowId: "weekly",
+    label: "Droid Core Weekly",
+    windowLabel: "Weekly",
+    durationMs: WEEK_MS,
+  },
+  {
+    tier: "core",
+    payloadKey: "monthly",
+    windowId: "monthly",
+    label: "Droid Core Monthly",
+    windowLabel: "Monthly",
+  },
 ];
 
 /**
@@ -69,17 +110,12 @@ export interface FactoryUsageParseContext {
   fetchedAt: number;
 }
 
-function parseTierBucket(
-  bucket: unknown,
-  spec: TierBucketSpec,
-  context: FactoryUsageParseContext,
-): UsageLimit | undefined {
-  if (typeof bucket !== "object" || bucket === null) return undefined;
-  const record = bucket as Record<string, unknown>;
-  const usedPercent = record.usedPercent;
-  if (typeof usedPercent !== "number" || !Number.isFinite(usedPercent)) return undefined;
-  const used = Math.min(100, Math.max(0, usedPercent));
+interface BucketResetInfo {
+  resetsAt: number | undefined;
+  hasActiveWindow: boolean;
+}
 
+function resolveBucketReset(record: Record<string, unknown>, fetchedAt: number): BucketResetInfo {
   const windowEndMs = typeof record.windowEnd === "string" ? Date.parse(record.windowEnd) : Number.NaN;
   const secondsRemaining =
     typeof record.secondsRemaining === "number" &&
@@ -87,31 +123,54 @@ function parseTierBucket(
     record.secondsRemaining >= 0
       ? record.secondsRemaining
       : undefined;
+
   // Prefer the absolute window end; only fall back to the relative seconds
   // when windowEnd is absent or unparseable.
   const resetsAt = Number.isFinite(windowEndMs)
     ? windowEndMs
     : secondsRemaining !== undefined
-      ? context.fetchedAt + secondsRemaining * 1000
+      ? fetchedAt + secondsRemaining * 1000
       : undefined;
 
   // A bucket whose reset is not in the future and that reports no remaining
   // seconds has no live window (e.g. Droid Core allowances on a Standard-only
   // plan). Keep it visible but neutral so it does not look available.
-  const hasActiveWindow = (resetsAt !== undefined && resetsAt > context.fetchedAt) || secondsRemaining !== undefined;
+  const hasActiveWindow = (resetsAt !== undefined && resetsAt > fetchedAt) || secondsRemaining !== undefined;
 
-  let status: UsageStatus;
-  const notes: string[] = [];
+  return { resetsAt, hasActiveWindow };
+}
+
+interface BucketStatusResolution {
+  status: UsageStatus;
+  notes?: string[];
+}
+
+function resolveBucketStatus(usedPercent: number, hasActiveWindow: boolean): BucketStatusResolution {
   if (!hasActiveWindow) {
-    status = "unknown";
-    notes.push("No active window for this plan");
-  } else if (used >= 100) {
-    status = "exhausted";
-  } else if (used >= 90) {
-    status = "warning";
-  } else {
-    status = "ok";
+    return { status: "unknown", notes: ["No active window for this plan"] };
   }
+  if (usedPercent >= 100) {
+    return { status: "exhausted" };
+  }
+  if (usedPercent >= 90) {
+    return { status: "warning" };
+  }
+  return { status: "ok" };
+}
+
+function parseTierBucket(
+  bucket: unknown,
+  spec: TierBucketSpec,
+  context: FactoryUsageParseContext,
+): UsageLimit | undefined {
+  if (!isRecord(bucket)) return undefined;
+  const record = bucket;
+  const usedPercent = record.usedPercent;
+  if (typeof usedPercent !== "number" || !Number.isFinite(usedPercent)) return undefined;
+
+  const used = Math.min(100, Math.max(0, usedPercent));
+  const { resetsAt, hasActiveWindow } = resolveBucketReset(record, context.fetchedAt);
+  const { status, notes } = resolveBucketStatus(used, hasActiveWindow);
 
   return {
     id: `${PROVIDER_ID}:${spec.tier}:${spec.windowId}`,
@@ -138,61 +197,41 @@ function parseTierBucket(
       unit: "percent",
     },
     status,
+    ...(notes ? { notes } : {}),
+  };
+}
+
+function createExtraUsageLimit(body: Record<string, unknown>, accountId?: string): UsageLimit | undefined {
+  const balanceCents = body.extraUsageBalanceCents;
+  if (typeof balanceCents !== "number" || !Number.isFinite(balanceCents) || balanceCents < 0) {
+    return undefined;
+  }
+
+  const notes: string[] = [];
+  if (typeof body.extraUsageAllowed === "boolean") {
+    notes.push(`Extra usage ${body.extraUsageAllowed ? "allowed" : "not allowed"}`);
+  }
+  if (typeof body.overagePreference === "string" && body.overagePreference.trim().length > 0) {
+    notes.push(`Overage preference: ${body.overagePreference}`);
+  }
+
+  return {
+    id: `${PROVIDER_ID}:extra-usage-balance`,
+    label: "Extra Usage balance",
+    scope: {
+      provider: PROVIDER_ID,
+      shared: true,
+      ...(accountId ? { accountId, orgId: accountId } : {}),
+    },
+    amount: { unit: "usd", remaining: balanceCents / 100 },
     ...(notes.length > 0 ? { notes } : {}),
   };
 }
 
-/**
- * Pure normalizer for the `/api/billing/limits` payload. Returns `null` when
- * the body is not a recognized billing-limits response; returns a report with
- * zero limits for a recognized response that carries no usable bucket (valid
- * legacy/unlimited account).
- */
-export function parseFactoryUsagePayload(
-  payload: unknown,
+function createFactoryUsageMetadata(
+  body: Record<string, unknown>,
   context: FactoryUsageParseContext,
-): UsageReport | null {
-  if (typeof payload !== "object" || payload === null) return null;
-  const body = payload as Record<string, unknown>;
-  if (!RECOGNIZED_PAYLOAD_KEYS.some((key) => key in body)) return null;
-
-  const limits: UsageLimit[] = [];
-  const rawLimits = body.limits;
-  const payloadLimits =
-    typeof rawLimits === "object" && rawLimits !== null ? (rawLimits as Record<string, unknown>) : undefined;
-
-  for (const spec of TIER_BUCKETS) {
-    const tierSection = payloadLimits?.[spec.tier];
-    const bucket =
-      typeof tierSection === "object" && tierSection !== null
-        ? (tierSection as Record<string, unknown>)[spec.payloadKey]
-        : undefined;
-    const limit = parseTierBucket(bucket, spec, context);
-    if (limit) limits.push(limit);
-  }
-
-  const balanceCents = body.extraUsageBalanceCents;
-  if (typeof balanceCents === "number" && Number.isFinite(balanceCents) && balanceCents >= 0) {
-    const notes: string[] = [];
-    if (typeof body.extraUsageAllowed === "boolean") {
-      notes.push(`Extra usage ${body.extraUsageAllowed ? "allowed" : "not allowed"}`);
-    }
-    if (typeof body.overagePreference === "string" && body.overagePreference.trim().length > 0) {
-      notes.push(`Overage preference: ${body.overagePreference}`);
-    }
-    limits.push({
-      id: `${PROVIDER_ID}:extra-usage-balance`,
-      label: "Extra Usage balance",
-      scope: {
-        provider: PROVIDER_ID,
-        shared: true,
-        ...(context.accountId ? { accountId: context.accountId, orgId: context.accountId } : {}),
-      },
-      amount: { unit: "usd", remaining: balanceCents / 100 },
-      ...(notes.length > 0 ? { notes } : {}),
-    });
-  }
-
+): Record<string, unknown> {
   const metadata: Record<string, unknown> = { endpoint: context.endpoint };
   if (context.accountId) {
     metadata.accountId = context.accountId;
@@ -208,6 +247,40 @@ export function parseFactoryUsagePayload(
   }
   if (typeof body.extraUsageAllowed === "boolean") metadata.extraUsageAllowed = body.extraUsageAllowed;
   if (typeof body.overagePreference === "string") metadata.overagePreference = body.overagePreference;
+  return metadata;
+}
+
+/**
+ * Pure normalizer for the `/api/billing/limits` payload. Returns `null` when
+ * the body is not a recognized billing-limits response; returns a report with
+ * zero limits for a recognized response that carries no usable bucket (valid
+ * legacy/unlimited account).
+ */
+export function parseFactoryUsagePayload(
+  payload: unknown,
+  context: FactoryUsageParseContext,
+): UsageReport | null {
+  if (!isRecord(payload)) return null;
+  const body = payload;
+  if (!RECOGNIZED_PAYLOAD_KEYS.some((key) => key in body)) return null;
+
+  const limits: UsageLimit[] = [];
+  const rawLimits = body.limits;
+  const payloadLimits = isRecord(rawLimits) ? rawLimits : undefined;
+
+  for (const spec of TIER_BUCKETS) {
+    const tierSection = payloadLimits?.[spec.tier];
+    const bucket = isRecord(tierSection) ? tierSection[spec.payloadKey] : undefined;
+    const limit = parseTierBucket(bucket, spec, context);
+    if (limit) limits.push(limit);
+  }
+
+  const extraUsageLimit = createExtraUsageLimit(body, context.accountId);
+  if (extraUsageLimit) {
+    limits.push(extraUsageLimit);
+  }
+
+  const metadata = createFactoryUsageMetadata(body, context);
 
   return {
     provider: PROVIDER_ID,
@@ -222,7 +295,7 @@ export function parseFactoryUsagePayload(
 
 /** Same base-URL precedence as model routing in router.ts. */
 function resolveUsageBaseUrl(params: UsageFetchParams): string {
-  const base = FACTORY_API_BASE_OVERRIDDEN ? FACTORY_API : (params.credential.apiEndpoint ?? FACTORY_API);
+  const base = resolveFactoryApiBase(params.credential.apiEndpoint);
   return base.replace(/\/+$/, "");
 }
 

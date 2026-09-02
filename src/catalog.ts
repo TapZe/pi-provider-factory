@@ -9,13 +9,15 @@ export type FactoryModelFamily =
   | "openai-completions"
   | "unsupported";
 
+const FACTORY_MAX_EFFORT = "max" as Effort;
+
 export const FACTORY_EFFORTS = [
   Effort.Minimal,
   Effort.Low,
   Effort.Medium,
   Effort.High,
   Effort.XHigh,
-  "max" as Effort,
+  FACTORY_MAX_EFFORT,
 ] as const;
 
 export interface ModelIdentity {
@@ -148,27 +150,38 @@ export function defaultCostFor(id: string): ProviderModelConfig["cost"] {
   return { input: 1.0, output: 3.0, cacheRead: 0.1, cacheWrite: 0 };
 }
 
-export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
-  const isXHighCapable =
-    config.id === "grok-4.6" ||
-    config.id.startsWith("gpt-5.6") ||
-    config.id.startsWith("glm-5.3") ||
-    config.id.startsWith("claude-opus-5") ||
-    config.id.startsWith("claude-fable-5");
-  const defaultEffortMap: Record<string, string> = isXHighCapable
-    ? { minimal: "low", max: "xhigh" }
-    : { minimal: "low", xhigh: "high", max: "high" };
+export function factoryThinkingFor(
+  modelId: string,
+  reasoning: boolean,
+  configuredThinking: ProviderModelConfig["thinking"] | undefined,
+): ProviderModelConfig["thinking"] {
+  if (configuredThinking) {
+    return configuredThinking;
+  }
 
-  const thinking =
-    config.thinking ??
-    (config.reasoning
-      ? {
-          mode: "effort" as const,
-          efforts: FACTORY_EFFORTS,
-          defaultLevel: Effort.High,
-          effortMap: defaultEffortMap,
-        }
-      : undefined);
+  if (!reasoning) {
+    return undefined;
+  }
+
+  const supportsExtraHighEffort =
+    modelId === "grok-4.6" ||
+    modelId.startsWith("gpt-5.6") ||
+    modelId.startsWith("glm-5.3") ||
+    modelId.startsWith("claude-opus-5") ||
+    modelId.startsWith("claude-fable-5");
+
+  return {
+    mode: "effort",
+    efforts: FACTORY_EFFORTS,
+    defaultLevel: Effort.High,
+    effortMap: supportsExtraHighEffort
+      ? { [Effort.Minimal]: "low", [FACTORY_MAX_EFFORT]: "xhigh" }
+      : { [Effort.Minimal]: "low", [Effort.XHigh]: "high", [FACTORY_MAX_EFFORT]: "high" },
+  };
+}
+
+export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
+  const thinking = factoryThinkingFor(config.id, config.reasoning, config.thinking);
 
   return {
     id: config.id,
@@ -184,6 +197,10 @@ export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
   };
 }
 
+// `contextWindow` is the total context exposed to OMP, not Droid's smaller
+// `maxInputTokens` compaction threshold. Prefer the upstream total window; use
+// Droid's lower hosted-route cap when Factory deliberately constrains a model.
+// `maxTokens` mirrors Droid's synchronous request ceiling for that route.
 export const FACTORY_MODELS: ProviderModelConfig[] = [
   // Claude and Anthropic-family models
   factoryModel({
@@ -191,7 +208,7 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Fable 5 (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 867000,
+    contextWindow: 1_000_000,
     maxTokens: 128000,
     premiumMultiplier: 4,
   }),
@@ -200,8 +217,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Opus 5 (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 200000,
-    maxTokens: 64000,
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
     premiumMultiplier: 2,
   }),
   factoryModel({
@@ -209,8 +226,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Opus 5 Fast (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 200000,
-    maxTokens: 64000,
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
     premiumMultiplier: 4,
   }),
   factoryModel({
@@ -218,8 +235,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Opus 4.8 (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 200000,
-    maxTokens: 64000,
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
     premiumMultiplier: 2,
   }),
   factoryModel({
@@ -227,8 +244,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Opus 4.8 Fast (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 200000,
-    maxTokens: 64000,
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
     premiumMultiplier: 4,
   }),
   factoryModel({
@@ -236,8 +253,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Opus 4.7 (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 200000,
-    maxTokens: 64000,
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
     premiumMultiplier: 2,
   }),
   factoryModel({
@@ -245,8 +262,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Opus 4.7 Fast (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 200000,
-    maxTokens: 64000,
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
     premiumMultiplier: 4,
   }),
   factoryModel({
@@ -254,8 +271,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Opus 4.6 (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 200000,
-    maxTokens: 64000,
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
     premiumMultiplier: 2,
   }),
   factoryModel({
@@ -263,8 +280,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Opus 4.6 Fast (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 200000,
-    maxTokens: 64000,
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
     premiumMultiplier: 4,
   }),
   factoryModel({
@@ -281,8 +298,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Sonnet 5 (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 1000000,
-    maxTokens: 128000,
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
     premiumMultiplier: 0.8,
   }),
   factoryModel({
@@ -290,7 +307,7 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Sonnet 4.6 (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 200000,
+    contextWindow: 1_000_000,
     maxTokens: 64000,
     premiumMultiplier: 1.2,
   }),
@@ -299,8 +316,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Claude Sonnet 4.5 (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 200000,
-    maxTokens: 64000,
+    contextWindow: 200_000,
+    maxTokens: 32_000,
     premiumMultiplier: 1.2,
   }),
   factoryModel({
@@ -319,8 +336,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GPT-5.6 Sol (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 400000,
-    maxTokens: 128000,
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
     premiumMultiplier: 0.8,
   }),
   factoryModel({
@@ -328,8 +345,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GPT-5.6 Sol Fast (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 400000,
-    maxTokens: 128000,
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
     premiumMultiplier: 1.6,
   }),
   factoryModel({
@@ -337,8 +354,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GPT-5.6 Terra (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 400000,
-    maxTokens: 128000,
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
     premiumMultiplier: 0.32,
   }),
   factoryModel({
@@ -346,8 +363,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GPT-5.6 Luna (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 400000,
-    maxTokens: 128000,
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
     premiumMultiplier: 0.032,
   }),
   factoryModel({
@@ -355,8 +372,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GPT-5.5 (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 400000,
-    maxTokens: 128000,
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
     premiumMultiplier: 0.8,
   }),
   factoryModel({
@@ -364,8 +381,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GPT-5.5 Fast (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 400000,
-    maxTokens: 128000,
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
     premiumMultiplier: 2,
   }),
   factoryModel({
@@ -373,8 +390,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GPT-5.5 Pro (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 400000,
-    maxTokens: 128000,
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
     premiumMultiplier: 4.8,
   }),
   factoryModel({
@@ -382,8 +399,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GPT-5.4 (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 400000,
-    maxTokens: 128000,
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
     premiumMultiplier: 0.4,
   }),
   factoryModel({
@@ -391,8 +408,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GPT-5.4 Fast (Factory)",
     reasoning: true,
     input: ["text", "image"],
-    contextWindow: 400000,
-    maxTokens: 128000,
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
     premiumMultiplier: 0.8,
   }),
   factoryModel({
@@ -467,8 +484,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Inkling (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 262144,
-    maxTokens: 65536,
+    contextWindow: 1_048_576,
+    maxTokens: 32_768,
     premiumMultiplier: 0.4,
   }),
   factoryModel({
@@ -485,8 +502,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GLM 5.3 Flash (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 1040000,
-    maxTokens: 131072,
+    contextWindow: 1_048_576,
+    maxTokens: 131_072,
     premiumMultiplier: 0.38,
   }),
   factoryModel({
@@ -503,8 +520,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GLM 5.2 Fast (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 1040000,
-    maxTokens: 131072,
+    contextWindow: 524_288,
+    maxTokens: 131_072,
     premiumMultiplier: 0.84,
   }),
   factoryModel({
@@ -512,8 +529,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GLM 5.1 (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 190000,
-    maxTokens: 131072,
+    contextWindow: 200_000,
+    maxTokens: 131_072,
     premiumMultiplier: 0.55,
   }),
   factoryModel({
@@ -521,8 +538,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GLM 5 (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 190000,
-    maxTokens: 32000,
+    contextWindow: 204_800,
+    maxTokens: 131_072,
     premiumMultiplier: 0.55,
   }),
   factoryModel({
@@ -530,8 +547,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GLM 4.7 (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 198000,
-    maxTokens: 25344,
+    contextWindow: 204_800,
+    maxTokens: 131_072,
     premiumMultiplier: 0.4,
   }),
   factoryModel({
@@ -539,8 +556,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "GLM 4.6 (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 200000,
-    maxTokens: 128000,
+    contextWindow: 204_800,
+    maxTokens: 131_072,
     premiumMultiplier: 0.25,
   }),
   factoryModel({
@@ -575,8 +592,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Kimi K2.5 (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 256000,
-    maxTokens: 32768,
+    contextWindow: 262_144,
+    maxTokens: 32_768,
     premiumMultiplier: 0.25,
   }),
   factoryModel({
@@ -584,8 +601,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "DeepSeek V4 Flash (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 1048576,
-    maxTokens: 65536,
+    contextWindow: 1_040_000,
+    maxTokens: 131_072,
     premiumMultiplier: 0.176,
   }),
   factoryModel({
@@ -593,8 +610,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "DeepSeek V4 Pro (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 1048576,
-    maxTokens: 65536,
+    contextWindow: 1_040_000,
+    maxTokens: 131_072,
     premiumMultiplier: 0.528,
   }),
   factoryModel({
@@ -611,8 +628,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "MiniMax M2.7 (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 196600,
-    maxTokens: 64000,
+    contextWindow: 204_800,
+    maxTokens: 64_000,
     premiumMultiplier: 0.12,
   }),
   factoryModel({
@@ -629,8 +646,8 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     name: "Nemotron 3 Ultra (Factory Core)",
     reasoning: true,
     input: ["text"],
-    contextWindow: 262144,
-    maxTokens: 65536,
+    contextWindow: 202_000,
+    maxTokens: 65_536,
     premiumMultiplier: 0.24,
   }),
 ];

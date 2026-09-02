@@ -2,269 +2,28 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
 
-import { FACTORY_API, factoryApiForRegion, WORKOS_CLIENT_ID, WORKOS_DEVICE_AUTHORIZE, WORKOS_TOKEN } from "./constants";
+import {
+  emailFromAccessToken,
+  expiresFromAccessToken,
+  firstOrganizationId,
+  formatErrorDetails,
+  identityFromWhoami,
+  parseDeviceAuthorization,
+  parseTokenResponse,
+  readJsonResponse,
+  TOKEN_EXPIRY_SKEW_MS,
+  type DeviceAuthorization,
+  type ParsedTokenResponse,
+} from "./auth-parsing";
+import { FACTORY_API, WORKOS_CLIENT_ID, WORKOS_DEVICE_AUTHORIZE, WORKOS_TOKEN } from "./constants";
+import { organizationIdFromAccessToken } from "./credential";
+import { isRecord, stringField } from "./object-fields";
 
 type Fetcher = NonNullable<OAuthLoginCallbacks["fetch"]>;
 
-type DeviceAuthorization = {
-  deviceCode: string;
-  userCode: string;
-  verificationUri: string;
-  verificationUriComplete: string;
-  expiresInSeconds: number;
-  intervalSeconds: number;
-};
-
-type ParsedTokenResponse = {
-  accessToken: string;
-  refreshToken: string;
-  expiresInSeconds?: number;
-  email?: string;
-  apiEndpoint?: string;
-};
-
 const DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
-const TOKEN_EXPIRY_SKEW_MS = 60_000;
-
-function formatErrorDetails(error: unknown): string {
-  if (error instanceof Error) {
-    const details = [`${error.name}: ${error.message}`];
-    const errorWithCode: Error & { code?: string; errno?: number | string; cause?: unknown } = error;
-
-    if (errorWithCode.code) {
-      details.push(`code=${errorWithCode.code}`);
-    }
-
-    if (typeof errorWithCode.errno !== "undefined") {
-      details.push(`errno=${String(errorWithCode.errno)}`);
-    }
-
-    if (typeof error.cause !== "undefined") {
-      details.push(`cause=${formatErrorDetails(error.cause)}`);
-    }
-
-    return details.join("; ");
-  }
-
-  return String(error);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function stringField(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key];
-
-  if (typeof value === "string" && value.length > 0) {
-    return value;
-  }
-
-  return undefined;
-}
-
-function numberField(record: Record<string, unknown>, key: string): number | undefined {
-  const value = record[key];
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === "string" && value.length > 0) {
-    const parsed = Number(value);
-
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-
-  return undefined;
-}
-
-function firstStringField(record: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = stringField(record, key);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return undefined;
-}
-
-function decodeBase64Url(segment: string): string {
-  const base64 = segment.replace(/-/g, "+").replace(/_/g, "/");
-  const paddedBase64 = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
-  const binary = atob(paddedBase64);
-  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
-
-  return new TextDecoder().decode(bytes);
-}
-
-function decodeJwtPayload(accessToken: string): Record<string, unknown> | null {
-  const segments = accessToken.split(".");
-
-  if (segments.length < 2 || !segments[1]) {
-    return null;
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(decodeBase64Url(segments[1]));
-
-    if (isRecord(parsed)) {
-      return parsed;
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
-function orgIdFromAccessToken(accessToken: string): string | undefined {
-  const payload = decodeJwtPayload(accessToken);
-
-  if (!payload) {
-    return undefined;
-  }
-
-  return firstStringField(payload, ["external_org_id", "org_id", "organization_id", "organizationId", "orgId"]);
-}
-
-function emailFromAccessToken(accessToken: string): string | undefined {
-  const payload = decodeJwtPayload(accessToken);
-
-  if (!payload) {
-    return undefined;
-  }
-
-  return stringField(payload, "email");
-}
-
-function expiresFromAccessToken(accessToken: string): number | undefined {
-  const payload = decodeJwtPayload(accessToken);
-
-  if (!payload) {
-    return undefined;
-  }
-
-  const exp = numberField(payload, "exp");
-
-  if (!exp) {
-    return undefined;
-  }
-
-  return exp * 1000 - TOKEN_EXPIRY_SKEW_MS;
-}
-
-function userEmailFromResponse(record: Record<string, unknown>): string | undefined {
-  const user = record.user;
-
-  if (!isRecord(user)) {
-    return undefined;
-  }
-
-  return stringField(user, "email");
-}
-
-function parseDeviceAuthorization(value: unknown): DeviceAuthorization {
-  if (!isRecord(value)) {
-    throw new Error("Factory device authorization returned a non-object response");
-  }
-
-  const deviceCode = stringField(value, "device_code");
-  const userCode = stringField(value, "user_code");
-  const verificationUri = stringField(value, "verification_uri");
-  const verificationUriComplete = stringField(value, "verification_uri_complete");
-  const expiresInSeconds = numberField(value, "expires_in");
-  const intervalSeconds = numberField(value, "interval");
-
-  if (!deviceCode || !userCode || !verificationUri || !verificationUriComplete || !expiresInSeconds || !intervalSeconds) {
-    throw new Error("Factory device authorization response is missing required fields");
-  }
-
-  return {
-    deviceCode,
-    userCode,
-    verificationUri,
-    verificationUriComplete,
-    expiresInSeconds,
-    intervalSeconds,
-  };
-}
-
-function parseTokenResponse(value: unknown, label: string, fallbackRefreshToken?: string): ParsedTokenResponse {
-  if (!isRecord(value)) {
-    throw new Error(`Factory OAuth ${label} returned a non-object response`);
-  }
-
-  const accessToken = stringField(value, "access_token");
-  if (!accessToken) {
-    throw new Error(`Factory OAuth ${label} response did not include access_token`);
-  }
-
-  const refreshToken = stringField(value, "refresh_token") ?? fallbackRefreshToken;
-  if (!refreshToken) {
-    throw new Error(`Factory OAuth ${label} response did not include refresh_token`);
-  }
-
-  return {
-    accessToken,
-    refreshToken,
-    expiresInSeconds: numberField(value, "expires_in"),
-    email: userEmailFromResponse(value),
-  };
-}
-
-function firstOrganizationId(value: unknown): string | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const workosOrgIds = value.workosOrgIds;
-
-  if (!Array.isArray(workosOrgIds)) {
-    return undefined;
-  }
-
-  for (const orgId of workosOrgIds) {
-    if (typeof orgId === "string" && orgId.length > 0) {
-      return orgId;
-    }
-  }
-
-  return undefined;
-}
-
-function identityFromWhoami(value: unknown): { accountId?: string; region?: string; apiEndpoint?: string } {
-  if (!isRecord(value)) {
-    return {};
-  }
-
-  const accountId = firstStringField(value, ["orgId", "org_id", "organization_id", "organizationId"]);
-  const region = stringField(value, "region");
-
-  return {
-    accountId,
-    region,
-    apiEndpoint: factoryApiForRegion(region),
-  };
-}
-
-async function readJsonResponse(response: Response, label: string): Promise<unknown> {
-  const responseBody = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`Factory OAuth ${label} request failed. status=${response.status}; body=${responseBody}`);
-  }
-
-  try {
-    return JSON.parse(responseBody);
-  } catch (error) {
-    throw new Error(`Factory OAuth ${label} returned invalid JSON: ${formatErrorDetails(error)}`);
-  }
-}
+const AUTH_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_TOKEN_LIFETIME_MS = 5 * 60 * 1000;
 
 async function requestDeviceAuthorization(fetchImpl: Fetcher): Promise<DeviceAuthorization> {
   const response = await fetchImpl(WORKOS_DEVICE_AUTHORIZE, {
@@ -275,7 +34,7 @@ async function requestDeviceAuthorization(fetchImpl: Fetcher): Promise<DeviceAut
     body: new URLSearchParams({
       client_id: WORKOS_CLIENT_ID,
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
   });
   const parsed = await readJsonResponse(response, "device authorization");
 
@@ -289,7 +48,7 @@ async function resolveOrganizationId(accessToken: string, fetchImpl: Fetcher): P
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -318,7 +77,7 @@ async function resolveWhoami(
   const response = await fetchImpl(`${FACTORY_API}/api/cli/whoami`, {
     method: "GET",
     headers,
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -414,7 +173,7 @@ async function postRefreshToken(
       client_id: WORKOS_CLIENT_ID,
       ...(organizationId ? { organization_id: organizationId } : {}),
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
   });
   const parsed = await readJsonResponse(response, "refresh token");
 
@@ -422,11 +181,11 @@ async function postRefreshToken(
 }
 
 function toCredentials(parsed: ParsedTokenResponse, prior?: OAuthCredentials): OAuthCredentials {
-  const accountId = orgIdFromAccessToken(parsed.accessToken);
+  const accountId = organizationIdFromAccessToken(parsed.accessToken);
   const email = parsed.email ?? emailFromAccessToken(parsed.accessToken) ?? prior?.email;
   const expires = parsed.expiresInSeconds
     ? Date.now() + parsed.expiresInSeconds * 1000 - TOKEN_EXPIRY_SKEW_MS
-    : expiresFromAccessToken(parsed.accessToken) ?? Date.now() + 300 * 1000;
+    : expiresFromAccessToken(parsed.accessToken) ?? Date.now() + DEFAULT_TOKEN_LIFETIME_MS;
 
   return {
     refresh: parsed.refreshToken,
@@ -440,7 +199,7 @@ function toCredentials(parsed: ParsedTokenResponse, prior?: OAuthCredentials): O
 }
 
 function requireOrgScopedCredential(credentials: OAuthCredentials, requestedOrganizationId: string): void {
-  const orgId = orgIdFromAccessToken(credentials.access);
+  const orgId = organizationIdFromAccessToken(credentials.access);
 
   if (!orgId) {
     throw new Error(
@@ -462,7 +221,7 @@ async function loginWithBrowser(callbacks: OAuthLoginCallbacks): Promise<OAuthCr
 
     const parsed = await pollDeviceToken(authorization, callbacks, fetchImpl);
     const credentials = toCredentials(parsed);
-    const initialFactoryOrgId = orgIdFromAccessToken(credentials.access);
+    const initialFactoryOrgId = organizationIdFromAccessToken(credentials.access);
 
     if (initialFactoryOrgId) {
       const identity = await resolveWhoami(credentials.access, fetchImpl, initialFactoryOrgId);
@@ -517,7 +276,7 @@ export async function refreshToken(credentials: OAuthCredentials): Promise<OAuth
       projectId: workosOrganizationId ?? credentials.projectId,
     };
 
-    if (!orgIdFromAccessToken(refreshed.access)) {
+    if (!organizationIdFromAccessToken(refreshed.access)) {
       workosOrganizationId = workosOrganizationId ?? (await resolveOrganizationId(refreshed.access, fetch));
 
       if (!workosOrganizationId) {
