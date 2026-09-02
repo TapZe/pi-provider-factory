@@ -3,6 +3,7 @@ import type { ProviderModelConfig } from "@oh-my-pi/pi-coding-agent";
 import { defaultCostFor, FACTORY_MODELS, factoryModel, familyOf } from "./catalog";
 
 const FACTORY_MODEL_DOCS_URL = "https://docs.factory.ai/models.md";
+const FACTORY_MODEL_DOCS_TIMEOUT_MS = 10_000;
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 
 // Factory's public model table does not publish token limits. For a newly
@@ -230,6 +231,7 @@ function mergeDocsModels(
 export async function fetchFactoryDynamicModels(_apiKey?: string): Promise<readonly ProviderModelConfig[]> {
   const [docsResponse, livePrices] = await Promise.all([
     fetch(FACTORY_MODEL_DOCS_URL, {
+      signal: AbortSignal.timeout(FACTORY_MODEL_DOCS_TIMEOUT_MS),
       headers: { Accept: "text/markdown,text/plain;q=0.9,*/*;q=0.1" },
     }),
     fetchOpenRouterPrices(),

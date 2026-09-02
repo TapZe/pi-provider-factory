@@ -5,19 +5,20 @@ import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oaut
 import {
   emailFromAccessToken,
   expiresFromAccessToken,
-  firstOrganizationId,
   formatErrorDetails,
   identityFromWhoami,
+  oauthErrorCodeFromResponse,
   parseDeviceAuthorization,
   parseTokenResponse,
+  parseUniqueOrganizationIds,
   readJsonResponse,
+  readJsonResponseBody,
   TOKEN_EXPIRY_SKEW_MS,
   type DeviceAuthorization,
   type ParsedTokenResponse,
 } from "./auth-parsing";
 import { FACTORY_API, WORKOS_CLIENT_ID, WORKOS_DEVICE_AUTHORIZE, WORKOS_TOKEN } from "./constants";
 import { organizationIdFromAccessToken } from "./credential";
-import { isRecord, stringField } from "./object-fields";
 
 type Fetcher = NonNullable<OAuthLoginCallbacks["fetch"]>;
 
@@ -25,7 +26,12 @@ const DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 const AUTH_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_TOKEN_LIFETIME_MS = 5 * 60 * 1000;
 
-async function requestDeviceAuthorization(fetchImpl: Fetcher): Promise<DeviceAuthorization> {
+function combineSignalWithTimeout(callerSignal?: AbortSignal, timeoutMs = AUTH_REQUEST_TIMEOUT_MS): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  return callerSignal ? AbortSignal.any([callerSignal, timeoutSignal]) : timeoutSignal;
+}
+
+async function requestDeviceAuthorization(fetchImpl: Fetcher, signal?: AbortSignal): Promise<DeviceAuthorization> {
   const response = await fetchImpl(WORKOS_DEVICE_AUTHORIZE, {
     method: "POST",
     headers: {
@@ -34,36 +40,33 @@ async function requestDeviceAuthorization(fetchImpl: Fetcher): Promise<DeviceAut
     body: new URLSearchParams({
       client_id: WORKOS_CLIENT_ID,
     }),
-    signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
+    signal: combineSignalWithTimeout(signal),
   });
   const parsed = await readJsonResponse(response, "device authorization");
 
   return parseDeviceAuthorization(parsed);
 }
 
-async function resolveOrganizationId(accessToken: string, fetchImpl: Fetcher): Promise<string | undefined> {
+async function resolveOrganizationIds(accessToken: string, fetchImpl: Fetcher, signal?: AbortSignal): Promise<string[]> {
   const response = await fetchImpl(`${FACTORY_API}/api/cli/org`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
+    signal: combineSignalWithTimeout(signal),
   });
 
-  if (!response.ok) {
-    return undefined;
-  }
 
   const parsed = await readJsonResponse(response, "organization membership");
-
-  return firstOrganizationId(parsed);
+  return parseUniqueOrganizationIds(parsed);
 }
 
 async function resolveWhoami(
   accessToken: string,
   fetchImpl: Fetcher,
   organizationId?: string,
+  signal?: AbortSignal,
 ): Promise<{ accountId?: string; region?: string; apiEndpoint?: string }> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
@@ -77,16 +80,61 @@ async function resolveWhoami(
   const response = await fetchImpl(`${FACTORY_API}/api/cli/whoami`, {
     method: "GET",
     headers,
-    signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
+    signal: combineSignalWithTimeout(signal),
   });
 
-  if (!response.ok) {
-    return {};
+  const parsed = await readJsonResponse(response, "whoami");
+  return identityFromWhoami(parsed);
+}
+
+async function selectOrganizationId(
+  organizations: string[],
+  callbacks: OAuthLoginCallbacks,
+): Promise<string> {
+  if (organizations.length === 0) {
+    throw new Error("Factory OAuth login did not expose an organization id; LLM calls would 403");
   }
 
-  const parsed = await readJsonResponse(response, "whoami");
+  if (organizations.length === 1) {
+    return organizations[0];
+  }
 
-  return identityFromWhoami(parsed);
+  if (!callbacks.onPrompt) {
+    throw new Error("Factory OAuth account has multiple organizations, but prompt callback is unavailable");
+  }
+
+  const promptMessage =
+    "Select Factory organization:\n" +
+    organizations.map((org, idx) => `  ${idx + 1}. ${org}`).join("\n") +
+    "\nEnter number or organization ID: ";
+
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const rawAnswer = await callbacks.onPrompt({
+      message: promptMessage,
+      placeholder: "1",
+    });
+    const answer = rawAnswer?.trim();
+
+    if (answer) {
+      const index = Number(answer);
+      if (Number.isInteger(index) && index >= 1 && index <= organizations.length) {
+        return organizations[index - 1];
+      }
+
+      if (organizations.includes(answer)) {
+        return answer;
+      }
+    }
+
+    if (attempt < MAX_ATTEMPTS) {
+      callbacks.onProgress?.(
+        `Invalid Factory organization selection. Choose between 1 and ${organizations.length} or enter an exact organization ID.`,
+      );
+    }
+  }
+
+  throw new Error(`Factory OAuth organization selection failed after ${MAX_ATTEMPTS} attempts`);
 }
 
 async function pollDeviceToken(
@@ -112,31 +160,15 @@ async function pollDeviceToken(
         device_code: authorization.deviceCode,
         client_id: WORKOS_CLIENT_ID,
       }),
-      signal,
+      signal: combineSignalWithTimeout(signal),
     });
-    const responseBody = await response.text();
+    const parsed = await readJsonResponseBody(response, "device token");
 
     if (response.ok) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(responseBody);
-      } catch (error) {
-        throw new Error(`Factory OAuth device token returned invalid JSON: ${formatErrorDetails(error)}`);
-      }
-
       return parseTokenResponse(parsed, "device token");
     }
 
-    let errorCode = "unknown";
-    try {
-      const parsed: unknown = JSON.parse(responseBody);
-
-      if (isRecord(parsed)) {
-        errorCode = stringField(parsed, "error") ?? errorCode;
-      }
-    } catch {
-      throw new Error(`Factory OAuth device token failed. status=${response.status}; body=${responseBody}`);
-    }
+    const errorCode = oauthErrorCodeFromResponse(parsed) ?? "unknown";
 
     switch (errorCode) {
       case "authorization_pending":
@@ -161,6 +193,7 @@ async function postRefreshToken(
   fetchImpl: Fetcher,
   fallbackRefreshToken: string,
   organizationId?: string,
+  signal?: AbortSignal,
 ): Promise<ParsedTokenResponse> {
   const response = await fetchImpl(WORKOS_TOKEN, {
     method: "POST",
@@ -173,7 +206,7 @@ async function postRefreshToken(
       client_id: WORKOS_CLIENT_ID,
       ...(organizationId ? { organization_id: organizationId } : {}),
     }),
-    signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
+    signal: combineSignalWithTimeout(signal),
   });
   const parsed = await readJsonResponse(response, "refresh token");
 
@@ -198,21 +231,33 @@ function toCredentials(parsed: ParsedTokenResponse, prior?: OAuthCredentials): O
   };
 }
 
-function requireOrgScopedCredential(credentials: OAuthCredentials, requestedOrganizationId: string): void {
+function requireOrgScopedCredential(credentials: OAuthCredentials, requestedOrganizationId: string): string {
   const orgId = organizationIdFromAccessToken(credentials.access);
 
   if (!orgId) {
-    throw new Error(
-      `Factory OAuth did not return an organization-scoped access token for ${requestedOrganizationId}; LLM calls would 403`,
-    );
+    throw new Error("Factory OAuth did not return an organization-scoped access token; LLM calls would 403");
+  }
+  if (orgId !== requestedOrganizationId) {
+    throw new Error("Factory OAuth returned a token for a different organization than the selected account");
+  }
+  return orgId;
+}
+
+function requireMatchingWhoamiOrganization(accountId: string | undefined, expectedOrganizationId: string): void {
+  if (!accountId) {
+    throw new Error("Factory whoami response did not include an organization ID");
+  }
+  if (accountId !== expectedOrganizationId) {
+    throw new Error("Factory whoami returned a different organization than the selected account");
   }
 }
 
 async function loginWithBrowser(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
   const fetchImpl = callbacks.fetch ?? fetch;
+  const callerSignal = callbacks.signal;
 
   try {
-    const authorization = await requestDeviceAuthorization(fetchImpl);
+    const authorization = await requestDeviceAuthorization(fetchImpl, callerSignal);
     callbacks.onAuth({
       url: authorization.verificationUriComplete,
       instructions: `Complete Factory login in your browser. If prompted, enter code ${authorization.userCode}.`,
@@ -224,38 +269,44 @@ async function loginWithBrowser(callbacks: OAuthLoginCallbacks): Promise<OAuthCr
     const initialFactoryOrgId = organizationIdFromAccessToken(credentials.access);
 
     if (initialFactoryOrgId) {
-      const identity = await resolveWhoami(credentials.access, fetchImpl, initialFactoryOrgId);
+      const identity = await resolveWhoami(credentials.access, fetchImpl, initialFactoryOrgId, callerSignal);
+      requireMatchingWhoamiOrganization(identity.accountId, initialFactoryOrgId);
 
       return {
         ...credentials,
-        accountId: identity.accountId ?? initialFactoryOrgId,
+        accountId: initialFactoryOrgId,
         apiEndpoint: identity.apiEndpoint ?? credentials.apiEndpoint,
+        projectId: initialFactoryOrgId,
       };
     }
 
-    const workosOrganizationId = await resolveOrganizationId(credentials.access, fetchImpl);
-
-    if (!workosOrganizationId) {
-      throw new Error("Factory OAuth login did not expose an organization id; LLM calls would 403");
-    }
+    const workosOrganizations = await resolveOrganizationIds(credentials.access, fetchImpl, callerSignal);
+    const selectedOrganizationId = await selectOrganizationId(workosOrganizations, callbacks);
 
     const organizationParsed = await postRefreshToken(
       credentials.refresh,
       fetchImpl,
       credentials.refresh,
-      workosOrganizationId,
+      selectedOrganizationId,
+      callerSignal,
     );
 
     const credentialsWithOrg = {
       ...toCredentials(organizationParsed, credentials),
-      projectId: workosOrganizationId,
+      projectId: selectedOrganizationId,
     };
-    requireOrgScopedCredential(credentialsWithOrg, workosOrganizationId);
-    const identity = await resolveWhoami(credentialsWithOrg.access, fetchImpl, credentialsWithOrg.accountId);
+    requireOrgScopedCredential(credentialsWithOrg, selectedOrganizationId);
+    const identity = await resolveWhoami(
+      credentialsWithOrg.access,
+      fetchImpl,
+      selectedOrganizationId,
+      callerSignal,
+    );
+    requireMatchingWhoamiOrganization(identity.accountId, selectedOrganizationId);
 
     return {
       ...credentialsWithOrg,
-      accountId: identity.accountId ?? credentialsWithOrg.accountId,
+      accountId: selectedOrganizationId,
       apiEndpoint: identity.apiEndpoint ?? credentialsWithOrg.apiEndpoint,
     };
   } catch (error) {
@@ -267,35 +318,69 @@ export async function login(callbacks: OAuthLoginCallbacks): Promise<OAuthCreden
   return loginWithBrowser(callbacks);
 }
 
-export async function refreshToken(credentials: OAuthCredentials): Promise<OAuthCredentials> {
+export async function refreshToken(
+  credentials: OAuthCredentials,
+  signal?: AbortSignal,
+  fetchImpl: Fetcher = fetch,
+): Promise<OAuthCredentials> {
   try {
     let workosOrganizationId = credentials.projectId;
-    let parsed = await postRefreshToken(credentials.refresh, fetch, credentials.refresh, workosOrganizationId);
+    let parsed = await postRefreshToken(
+      credentials.refresh,
+      fetchImpl,
+      credentials.refresh,
+      workosOrganizationId,
+      signal,
+    );
     let refreshed = {
       ...toCredentials(parsed, credentials),
       projectId: workosOrganizationId ?? credentials.projectId,
     };
 
-    if (!organizationIdFromAccessToken(refreshed.access)) {
-      workosOrganizationId = workosOrganizationId ?? (await resolveOrganizationId(refreshed.access, fetch));
+    let tokenOrganizationId = organizationIdFromAccessToken(refreshed.access);
+    if (tokenOrganizationId && workosOrganizationId && tokenOrganizationId !== workosOrganizationId) {
+      throw new Error("Factory OAuth refresh returned a token for a different organization than the stored account");
+    }
+    workosOrganizationId = workosOrganizationId ?? tokenOrganizationId;
 
+    if (!tokenOrganizationId) {
       if (!workosOrganizationId) {
-        throw new Error("Factory OAuth refresh did not expose an organization id; run `/logout factory` and `/login factory`");
+        const orgs = await resolveOrganizationIds(refreshed.access, fetchImpl, signal);
+        if (orgs.length === 1) {
+          workosOrganizationId = orgs[0];
+        } else if (orgs.length > 1) {
+          throw new Error(
+            "Factory OAuth refresh encountered multiple organizations without a stored projectId; run `/logout factory` and `/login factory` to select an organization",
+          );
+        } else {
+          throw new Error("Factory OAuth refresh did not expose an organization id; run `/logout factory` and `/login factory`");
+        }
       }
 
-      parsed = await postRefreshToken(refreshed.refresh, fetch, refreshed.refresh, workosOrganizationId);
+      parsed = await postRefreshToken(
+        refreshed.refresh,
+        fetchImpl,
+        refreshed.refresh,
+        workosOrganizationId,
+        signal,
+      );
       refreshed = {
         ...toCredentials(parsed, { ...credentials, ...refreshed, projectId: workosOrganizationId }),
         projectId: workosOrganizationId,
       };
-      requireOrgScopedCredential(refreshed, workosOrganizationId);
+      tokenOrganizationId = requireOrgScopedCredential(refreshed, workosOrganizationId);
     }
 
-    const identity = await resolveWhoami(refreshed.access, fetch, refreshed.accountId);
+    if (!tokenOrganizationId) {
+      throw new Error("Factory OAuth refresh did not produce an organization-scoped token");
+    }
+    const identity = await resolveWhoami(refreshed.access, fetchImpl, tokenOrganizationId, signal);
+    requireMatchingWhoamiOrganization(identity.accountId, tokenOrganizationId);
 
     return {
       ...refreshed,
-      accountId: identity.accountId ?? refreshed.accountId,
+      accountId: tokenOrganizationId,
+      projectId: workosOrganizationId ?? tokenOrganizationId,
       apiEndpoint: identity.apiEndpoint ?? refreshed.apiEndpoint,
     };
   } catch (error) {
@@ -305,7 +390,7 @@ export async function refreshToken(credentials: OAuthCredentials): Promise<OAuth
 
 export function getApiKey(credentials: OAuthCredentials): string {
   return JSON.stringify({
-    access: credentials.access,
+    token: credentials.access,
     orgId: credentials.accountId ?? null,
     apiEndpoint: credentials.apiEndpoint ?? null,
   });

@@ -8,7 +8,10 @@ const ORGANIZATION_ID_CLAIMS = [
   "orgId",
 ] as const;
 
+export type FactoryCredentialSource = "missing" | "invalid" | "oauth-envelope" | "raw";
+
 export interface ParsedFactoryCredential {
+  source: FactoryCredentialSource;
   access?: string;
   orgId: string | null;
   apiEndpoint: string | null;
@@ -59,6 +62,7 @@ function organizationIdFromCredentialToken(accessToken: string): string | undefi
 
 function rawFactoryCredential(access: string): ParsedFactoryCredential {
   return {
+    source: "raw",
     access,
     orgId: organizationIdFromCredentialToken(access) ?? null,
     apiEndpoint: null,
@@ -66,8 +70,8 @@ function rawFactoryCredential(access: string): ParsedFactoryCredential {
 }
 
 export function parseFactoryCredential(raw: string | undefined): ParsedFactoryCredential {
-  if (!raw) {
-    return { orgId: null, apiEndpoint: null };
+  if (!raw || raw.trim().length === 0) {
+    return { source: "missing", orgId: null, apiEndpoint: null };
   }
 
   let parsed: unknown;
@@ -81,12 +85,13 @@ export function parseFactoryCredential(raw: string | undefined): ParsedFactoryCr
     return rawFactoryCredential(raw);
   }
 
-  const access = stringField(parsed, "access");
+  const access = stringField(parsed, "token");
   if (!access) {
-    return rawFactoryCredential(raw);
+    return { source: "invalid", orgId: null, apiEndpoint: null };
   }
 
   return {
+    source: "oauth-envelope",
     access,
     orgId: stringField(parsed, "orgId") ?? organizationIdFromCredentialToken(access) ?? null,
     apiEndpoint: stringField(parsed, "apiEndpoint") ?? null,
