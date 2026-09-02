@@ -35,6 +35,7 @@ export default function registerFactoryProvider(pi: ExtensionAPI) {
     ...FACTORY_PROVIDER_TRANSPORT,
     models: FACTORY_MODELS,
     streamSimple: factoryStreamSimple,
+    usage: factoryUsageProvider,
     usageProvider: factoryUsageProvider,
     oauth: {
       name: "Factory (Droid)",
@@ -42,7 +43,7 @@ export default function registerFactoryProvider(pi: ExtensionAPI) {
       refreshToken,
       getApiKey,
     },
-  });
+  } as any);
 
   pi.registerProvider(PROVIDER_ID, {
     ...FACTORY_PROVIDER_TRANSPORT,
@@ -50,6 +51,11 @@ export default function registerFactoryProvider(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", (_event, ctx) => {
+    const authStorage = (ctx as any)?.modelRegistry?.authStorage ?? (ctx as any)?.session?.modelRegistry?.authStorage;
+    if (authStorage?.setRuntimeUsageProvider) {
+      authStorage.setRuntimeUsageProvider(PROVIDER_ID, factoryUsageProvider);
+    }
+
     const now = Date.now();
     if (now - lastForcedRefreshAt < FORCED_REFRESH_INTERVAL_MS) return;
     lastForcedRefreshAt = now;
