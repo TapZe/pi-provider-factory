@@ -224,7 +224,10 @@ describe("Factory Router & Tool Execution Configuration", () => {
     expect(upstreamProviderFor("gpt-5.6-sol")).toBe("openai");
     expect(familyOf("kimi-k3")).toBe("openai-completions");
     expect(upstreamProviderFor("kimi-k3")).toBe("fireworks");
-    expect(familyOf("grok-4.6")).toBe("unsupported");
+    expect(familyOf("grok-4.6")).toBe("openai-responses");
+    expect(upstreamProviderFor("grok-4.6")).toBe("xai");
+    expect(familyOf("glm-5.3-flash")).toBe("openai-completions");
+    expect(upstreamProviderFor("glm-5.3-flash")).toBe("fireworks");
   });
   it("preserves Factory Core reasoning and tool-call history", async () => {
     const expectedReasoningContent = new Map([
@@ -262,6 +265,53 @@ describe("Factory Router & Tool Execution Configuration", () => {
       });
       expect(toolResult?.name).toBe(modelId.startsWith("kimi-") ? "read" : undefined);
     }
+  });
+
+  it("routes Grok through Factory's OpenAI Responses gateway with xai provider", async () => {
+    const originalFetch = globalThis.fetch;
+    let capturedUrl = "";
+    let capturedHeaders: Headers | undefined;
+
+    globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+      const [input, init] = args;
+      const request = input instanceof Request ? input : new Request(typeof input === "string" ? input : input.toString(), init);
+      capturedUrl = request.url;
+      capturedHeaders = request.headers;
+
+      return new Response(
+        [
+          'data: {"id":"resp_grok","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}\n\n',
+          "data: [DONE]\n\n",
+        ].join(""),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    }) as typeof fetch;
+
+    try {
+      const stream = factoryStreamSimple(
+        testFactoryModel("grok-4.6"),
+        {
+          systemPrompt: [],
+          messages: [{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: Date.now() }],
+        },
+        {
+          apiKey: JSON.stringify({
+            access: "test-factory-oauth-token",
+            orgId: "test-org",
+            apiEndpoint: "http://factory.test",
+          }),
+        },
+      );
+
+      await stream.result();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(capturedUrl).toBe("http://factory.test/api/llm/o/v1/responses");
+    expect(capturedHeaders?.get("x-api-provider")).toBe("xai");
+    expect(capturedHeaders?.get("openai-platform")).toBe("org-bHuLtG1fGmYk5YaOihAAXFBw");
+    expect(capturedHeaders?.get("x-factory-org-id")).toBe("test-org");
   });
 
 });
