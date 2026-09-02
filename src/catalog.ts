@@ -9,13 +9,15 @@ export type FactoryModelFamily =
   | "openai-completions"
   | "unsupported";
 
+const FACTORY_MAX_EFFORT = "max" as Effort;
+
 export const FACTORY_EFFORTS = [
   Effort.Minimal,
   Effort.Low,
   Effort.Medium,
   Effort.High,
   Effort.XHigh,
-  "max" as Effort,
+  FACTORY_MAX_EFFORT,
 ] as const;
 
 export interface ModelIdentity {
@@ -148,27 +150,38 @@ export function defaultCostFor(id: string): ProviderModelConfig["cost"] {
   return { input: 1.0, output: 3.0, cacheRead: 0.1, cacheWrite: 0 };
 }
 
-export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
-  const isXHighCapable =
-    config.id === "grok-4.6" ||
-    config.id.startsWith("gpt-5.6") ||
-    config.id.startsWith("glm-5.3") ||
-    config.id.startsWith("claude-opus-5") ||
-    config.id.startsWith("claude-fable-5");
-  const defaultEffortMap: Record<string, string> = isXHighCapable
-    ? { minimal: "low", max: "xhigh" }
-    : { minimal: "low", xhigh: "high", max: "high" };
+export function factoryThinkingFor(
+  modelId: string,
+  reasoning: boolean,
+  configuredThinking: ProviderModelConfig["thinking"] | undefined,
+): ProviderModelConfig["thinking"] {
+  if (configuredThinking) {
+    return configuredThinking;
+  }
 
-  const thinking =
-    config.thinking ??
-    (config.reasoning
-      ? {
-          mode: "effort" as const,
-          efforts: FACTORY_EFFORTS,
-          defaultLevel: Effort.High,
-          effortMap: defaultEffortMap,
-        }
-      : undefined);
+  if (!reasoning) {
+    return undefined;
+  }
+
+  const supportsExtraHighEffort =
+    modelId === "grok-4.6" ||
+    modelId.startsWith("gpt-5.6") ||
+    modelId.startsWith("glm-5.3") ||
+    modelId.startsWith("claude-opus-5") ||
+    modelId.startsWith("claude-fable-5");
+
+  return {
+    mode: "effort",
+    efforts: FACTORY_EFFORTS,
+    defaultLevel: Effort.High,
+    effortMap: supportsExtraHighEffort
+      ? { [Effort.Minimal]: "low", [FACTORY_MAX_EFFORT]: "xhigh" }
+      : { [Effort.Minimal]: "low", [Effort.XHigh]: "high", [FACTORY_MAX_EFFORT]: "high" },
+  };
+}
+
+export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
+  const thinking = factoryThinkingFor(config.id, config.reasoning, config.thinking);
 
   return {
     id: config.id,

@@ -4,6 +4,20 @@ import { defaultCostFor, FACTORY_MODELS, factoryModel, familyOf } from "./catalo
 
 const FACTORY_MODEL_DOCS_URL = "https://docs.factory.ai/models.md";
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
+const PROVIDER_PREFIXES = [
+  "anthropic/",
+  "openai/",
+  "moonshotai/",
+  "deepseek/",
+  "z-ai/",
+  "minimax/",
+  "x-ai/",
+  "nvidia/",
+] as const;
+
+function parsePerMillionCost(rawPricePerToken: string | undefined): number {
+  return Math.round(Number(rawPricePerToken || 0) * 1_000_000 * 1000) / 1000;
+}
 
 export type FactoryModelDocsEntry = {
   id: string;
@@ -40,26 +54,26 @@ function parseMultiplier(cell: string | undefined): number | undefined {
 export async function fetchOpenRouterPrices(): Promise<Map<string, LiveTokenCost>> {
   const priceMap = new Map<string, LiveTokenCost>();
   try {
-    const res = await fetch(OPENROUTER_MODELS_URL, {
+    const response = await fetch(OPENROUTER_MODELS_URL, {
       signal: AbortSignal.timeout(2500),
       headers: { Accept: "application/json" },
     });
-    if (!res.ok) return priceMap;
-    const data = (await res.json()) as {
+    if (!response.ok) return priceMap;
+    const payload = (await response.json()) as {
       data?: Array<{
         id: string;
         pricing?: { prompt?: string; completion?: string; input_cache_read?: string };
       }>;
     };
-    if (!Array.isArray(data.data)) return priceMap;
+    if (!Array.isArray(payload.data)) return priceMap;
 
-    for (const m of data.data) {
-      if (m.id && m.pricing) {
-        const input = Math.round(Number(m.pricing.prompt || 0) * 1_000_000 * 1000) / 1000;
-        const output = Math.round(Number(m.pricing.completion || 0) * 1_000_000 * 1000) / 1000;
-        const cacheRead = Math.round(Number(m.pricing.input_cache_read || 0) * 1_000_000 * 1000) / 1000;
+    for (const model of payload.data) {
+      if (model.id && model.pricing) {
+        const input = parsePerMillionCost(model.pricing.prompt);
+        const output = parsePerMillionCost(model.pricing.completion);
+        const cacheRead = parsePerMillionCost(model.pricing.input_cache_read);
         if (input > 0 || output > 0) {
-          priceMap.set(m.id.toLowerCase(), { input, output, cacheRead, cacheWrite: 0 });
+          priceMap.set(model.id.toLowerCase(), { input, output, cacheRead, cacheWrite: 0 });
         }
       }
     }
@@ -71,17 +85,19 @@ export async function fetchOpenRouterPrices(): Promise<Map<string, LiveTokenCost
 
 export function matchLivePrice(id: string, priceMap: Map<string, LiveTokenCost>): LiveTokenCost | undefined {
   if (priceMap.size === 0) return undefined;
-  const norm = id.toLowerCase();
-  const direct = priceMap.get(norm);
-  if (direct) return direct;
+  const normalizedId = id.toLowerCase();
+  const directMatch = priceMap.get(normalizedId);
+  if (directMatch) return directMatch;
 
-  for (const prefix of ["anthropic/", "openai/", "moonshotai/", "deepseek/", "z-ai/", "minimax/", "x-ai/", "nvidia/"]) {
-    const prefixed = priceMap.get(prefix + norm);
-    if (prefixed) return prefixed;
+  for (const prefix of PROVIDER_PREFIXES) {
+    const prefixedCost = priceMap.get(prefix + normalizedId);
+    if (prefixedCost) return prefixedCost;
   }
 
-  for (const [k, v] of priceMap.entries()) {
-    if (k.endsWith("/" + norm) || k.endsWith(":" + norm)) return v;
+  for (const [candidateId, tokenCost] of priceMap.entries()) {
+    if (candidateId.endsWith("/" + normalizedId) || candidateId.endsWith(":" + normalizedId)) {
+      return tokenCost;
+    }
   }
   return undefined;
 }
@@ -176,25 +192,25 @@ function mergeDocsModels(
   livePrices: Map<string, LiveTokenCost> = new Map(),
 ): ProviderModelConfig[] {
   const merged: ProviderModelConfig[] = FACTORY_MODELS.map((model) => {
-    const live = matchLivePrice(model.id, livePrices);
-    return live ? { ...model, cost: live } : model;
+    const liveCost = matchLivePrice(model.id, livePrices);
+    return liveCost ? { ...model, cost: liveCost } : model;
   });
 
-  const seen = new Set<string>(merged.map((model) => model.id));
+  const seenModelIds = new Set<string>(merged.map((model) => model.id));
 
   for (const entry of entries) {
-    if (seen.has(entry.id)) {
+    if (seenModelIds.has(entry.id)) {
       continue;
     }
 
-    const live = matchLivePrice(entry.id, livePrices);
-    const model = docsEntryToModel(entry, live);
+    const liveCost = matchLivePrice(entry.id, livePrices);
+    const model = docsEntryToModel(entry, liveCost);
     if (!model) {
       continue;
     }
 
     merged.push(model);
-    seen.add(entry.id);
+    seenModelIds.add(entry.id);
   }
 
   return merged;
@@ -205,18 +221,18 @@ function mergeDocsModels(
 // strictly better than returning the static fallback, which would be recorded
 // as a successful authoritative fetch and drop every docs-only model for 24 h.
 export async function fetchFactoryDynamicModels(_apiKey?: string): Promise<readonly ProviderModelConfig[]> {
-  const [docsRes, livePrices] = await Promise.all([
+  const [docsResponse, livePrices] = await Promise.all([
     fetch(FACTORY_MODEL_DOCS_URL, {
       headers: { Accept: "text/markdown,text/plain;q=0.9,*/*;q=0.1" },
     }),
     fetchOpenRouterPrices(),
   ]);
 
-  if (!docsRes.ok) {
-    throw new Error(`factory: model docs fetch failed: HTTP ${docsRes.status}`);
+  if (!docsResponse.ok) {
+    throw new Error(`factory: model docs fetch failed: HTTP ${docsResponse.status}`);
   }
 
-  const markdown = await docsRes.text();
+  const markdown = await docsResponse.text();
 
   const entries = parseFactoryModelDocs(markdown);
   if (entries.length === 0) {
