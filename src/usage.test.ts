@@ -242,14 +242,14 @@ describe("factoryUsageProvider.supports", () => {
   }
 
   test("accepts only factory OAuth credentials with a non-empty access token", () => {
-    expect(factoryUsageProvider.supports(params({ type: "oauth", accessToken: "tok" }))).toBe(true);
-    expect(factoryUsageProvider.supports(params({ type: "oauth", accessToken: "  " }))).toBe(false);
-    expect(factoryUsageProvider.supports(params({ type: "oauth" }))).toBe(false);
+    expect(factoryUsageProvider.supports?.(params({ type: "oauth", accessToken: "tok" }))).toBe(true);
+    expect(factoryUsageProvider.supports?.(params({ type: "oauth", accessToken: "  " }))).toBe(false);
+    expect(factoryUsageProvider.supports?.(params({ type: "oauth" }))).toBe(false);
   });
 
   test("rejects Factory API keys and other providers", () => {
-    expect(factoryUsageProvider.supports(params({ type: "api_key", apiKey: "fk-secret" }))).toBe(false);
-    expect(factoryUsageProvider.supports(params({ type: "oauth", accessToken: "tok" }, "other"))).toBe(false);
+    expect(factoryUsageProvider.supports?.(params({ type: "api_key", apiKey: "fk-secret" }))).toBe(false);
+    expect(factoryUsageProvider.supports?.(params({ type: "oauth", accessToken: "tok" }, "other"))).toBe(false);
   });
 
   test("opts into credential validation", () => {
