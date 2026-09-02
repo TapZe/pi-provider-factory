@@ -314,6 +314,50 @@ describe("Factory Router & Tool Execution Configuration", () => {
     expect(capturedHeaders?.get("x-factory-org-id")).toBe("test-org");
   });
 
+  it("supports max thinking effort and attaches identity for all model families", async () => {
+    const { identityFor, FACTORY_EFFORTS } = require("./catalog");
+
+    expect(identityFor("grok-4.5")).toEqual({ class: "xai", family: "grok" });
+    expect(identityFor("glm-5.3-flash")).toEqual({ class: "glm", family: "glm" });
+    expect(identityFor("gpt-5.6-sol")).toEqual({ class: "openai", family: "gpt" });
+    expect(identityFor("claude-opus-5")).toEqual({ class: "anthropic", family: "opus" });
+    expect(FACTORY_EFFORTS).toContain("max");
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response(
+        [
+          'data: {"id":"resp_test","choices":[{"delta":{"content":"ok"}}]}\n\n',
+          "data: [DONE]\n\n",
+        ].join(""),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    }) as unknown as typeof fetch;
+
+    try {
+      // Must not throw "Thinking effort max is not supported" or "undefined is not an object (evaluating 'e.identity.class')"
+      const stream = factoryStreamSimple(
+        testFactoryModel("glm-5.3-flash"),
+        {
+          systemPrompt: [],
+          messages: [{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: Date.now() }],
+        },
+        {
+          apiKey: JSON.stringify({
+            access: "test-factory-oauth-token",
+            orgId: "test-org",
+            apiEndpoint: "http://factory.test",
+          }),
+          reasoning: "max" as any,
+        },
+      );
+
+      await stream.result();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
 });
 
 describe("Factory Droid tool-call normalization", () => {

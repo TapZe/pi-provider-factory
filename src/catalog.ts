@@ -1,3 +1,4 @@
+import { Effort } from "@oh-my-pi/pi-ai";
 import type { ProviderModelConfig } from "@oh-my-pi/pi-coding-agent";
 
 import { CUSTOM_API } from "./constants";
@@ -7,6 +8,24 @@ export type FactoryModelFamily =
   | "openai-responses"
   | "openai-completions"
   | "unsupported";
+
+export const FACTORY_EFFORTS = [
+  Effort.Minimal,
+  Effort.Low,
+  Effort.Medium,
+  Effort.High,
+  Effort.XHigh,
+  "max" as Effort,
+] as const;
+
+export interface ModelIdentity {
+  class: string;
+  family?: string;
+  revision?: string;
+  effort?: Effort | "off";
+  thinkingVariant?: boolean;
+  logicalId?: string;
+}
 
 export type FactoryModelInput = {
   id: string;
@@ -130,12 +149,22 @@ export function defaultCostFor(id: string): ProviderModelConfig["cost"] {
 }
 
 export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
+  const thinking =
+    config.thinking ??
+    (config.reasoning
+      ? {
+          mode: "effort" as const,
+          efforts: FACTORY_EFFORTS,
+          defaultLevel: Effort.High,
+        }
+      : undefined);
+
   return {
     id: config.id,
     name: config.name,
     api: CUSTOM_API,
     reasoning: config.reasoning,
-    thinking: config.thinking,
+    thinking,
     input: config.input,
     cost: config.cost ?? defaultCostFor(config.id),
     premiumMultiplier: config.premiumMultiplier,
@@ -639,3 +668,36 @@ export function upstreamProviderFor(id: string): FactoryUpstreamProvider {
 
   return "fireworks";
 }
+
+export function identityFor(id: string): ModelIdentity {
+  if (id.startsWith("claude-") || id.startsWith("atlas-") || id.startsWith("aster-")) {
+    const parts = id.split("-");
+    return { class: "anthropic", family: parts[1] ?? "claude" };
+  }
+  if (id.startsWith("minimax-")) {
+    return { class: "minimax", family: "minimax" };
+  }
+  if (id.startsWith("gpt-") || id.endsWith("-codex")) {
+    return { class: "openai", family: "gpt" };
+  }
+  if (id.startsWith("grok-")) {
+    return { class: "xai", family: "grok" };
+  }
+  if (id.startsWith("glm-")) {
+    return { class: "glm", family: "glm" };
+  }
+  if (id.startsWith("kimi-")) {
+    return { class: "kimi", family: "kimi" };
+  }
+  if (id.startsWith("deepseek-")) {
+    return { class: "deepseek", family: "deepseek" };
+  }
+  if (id.startsWith("nemotron-")) {
+    return { class: "nemotron", family: "nemotron" };
+  }
+  if (id.startsWith("inkling")) {
+    return { class: "inkling", family: "inkling" };
+  }
+  return { class: "unknown" };
+}
+

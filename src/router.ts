@@ -6,7 +6,7 @@ import { createProviderErrorMessage } from "@oh-my-pi/pi-ai/providers/error-mess
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { streamSimple, type AssistantMessage, type Context, type StreamOptions } from "@oh-my-pi/pi-ai";
 
-import { familyOf, upstreamProviderFor } from "./catalog";
+import { FACTORY_EFFORTS, familyOf, identityFor, upstreamProviderFor } from "./catalog";
 import { factoryStreamMarkupHealingPattern, normalizeFactoryToolCallStream } from "./tool-call-normalization";
 import {
   ANTHROPIC_BETAS,
@@ -259,10 +259,9 @@ function buildRequestHeaders(options: Parameters<NonNullable<ProviderConfig["str
 
 
 
-function clampReasoningEffort(effort: Effort | undefined, modelId: string): Effort | undefined {
+function clampReasoningEffort(effort: Effort | undefined, _modelId: string): Effort | undefined {
   if (!effort) return undefined;
   if ((effort as string) === "off" || (effort as string) === "none") return undefined;
-  if (modelId.startsWith("kimi-") && (effort as string) === "max") return Effort.XHigh;
   return effort;
 }
 
@@ -324,6 +323,16 @@ function buildTargetModel(
         }
       : undefined;
 
+  const thinking =
+    model.thinking ??
+    (model.reasoning
+      ? {
+          mode: "effort",
+          efforts: FACTORY_EFFORTS,
+          defaultLevel: Effort.High,
+        }
+      : undefined);
+
   const spec: ModelSpec<FactoryTargetApi> = {
     provider: PROVIDER_ID,
     id: model.id,
@@ -331,6 +340,7 @@ function buildTargetModel(
     api: targetApi,
     baseUrl,
     reasoning: model.reasoning,
+    thinking,
     supportsTools: true,
     compat,
     input: model.input,
@@ -341,7 +351,12 @@ function buildTargetModel(
     headers,
   };
 
-  return buildModel(spec);
+  const target = buildModel(spec);
+  (target as any).identity = identityFor(model.id);
+  if (thinking) {
+    target.thinking = thinking as any;
+  }
+  return target;
 }
 
 export const factoryStreamSimple: NonNullable<ProviderConfig["streamSimple"]> = (model, context, options) => {
