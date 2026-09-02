@@ -729,3 +729,19 @@ export function identityFor(id: string): ModelIdentity {
   return { class: "unknown" };
 }
 
+export type FactoryQuotaTier = "standard" | "core";
+
+export function factoryQuotaTierFor(id: string): FactoryQuotaTier {
+  if (
+    id.startsWith("claude-") ||
+    id.startsWith("atlas-") ||
+    id.startsWith("aster-") ||
+    id.startsWith("gpt-") ||
+    id.endsWith("-codex") ||
+    id.startsWith("grok-")
+  ) {
+    return "standard";
+  }
+  return "core";
+}
+

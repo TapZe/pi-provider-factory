@@ -1,14 +1,10 @@
-import type {
-  UsageFetchContext,
-  UsageFetchParams,
-  UsageLimit,
-  UsageProvider,
-  UsageReport,
-  UsageStatus,
-} from "@oh-my-pi/pi-ai";
+import type { FetchImpl, UsageFetchContext, UsageFetchParams, UsageProvider, UsageReport } from "@oh-my-pi/pi-ai";
 
 import { FACTORY_HEADERS, PROVIDER_ID, resolveFactoryApiBase } from "./constants";
-import { isRecord } from "./object-fields";
+import { parseFactoryUsagePayload, type FactoryUsageParseContext } from "./usage-parsing";
+
+export { parseFactoryUsagePayload };
+export type { FactoryUsageParseContext };
 
 /**
  * Factory account/quota reporting for Oh My Pi's native `/usage`.
@@ -19,284 +15,214 @@ import { isRecord } from "./object-fields";
  * `fk-...` API keys with 401, so this fetcher is intentionally OAuth-only.
  */
 
-const BILLING_LIMITS_PATH = "/api/billing/limits";
-const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+export const BILLING_LIMITS_PATH = "/api/billing/limits";
+export const DEFAULT_USAGE_CACHE_TTL_MS = 30_000;
+export const DEFAULT_USAGE_REQUEST_TIMEOUT_MS = 10_000;
+export const MAX_USAGE_CACHE_ENTRIES = 64;
 
-type TierId = "standard" | "core";
-type WindowId = "5h" | "weekly" | "monthly";
-
-interface TierBucketSpec {
-  tier: TierId;
-  payloadKey: "fiveHour" | "weekly" | "monthly";
-  windowId: WindowId;
-  label: string;
-  windowLabel: string;
-  /** Omitted for monthly: Factory's monthly window is calendar-based. */
-  durationMs?: number;
+export interface UsageSnapshot {
+  report: UsageReport;
+  expiresAt: number;
 }
 
-/** Fixed emission order: all Standard windows, then all Droid Core windows. */
-const TIER_BUCKETS: readonly TierBucketSpec[] = [
-  {
-    tier: "standard",
-    payloadKey: "fiveHour",
-    windowId: "5h",
-    label: "Standard 5 Hour",
-    windowLabel: "5 Hour",
-    durationMs: FIVE_HOURS_MS,
-  },
-  {
-    tier: "standard",
-    payloadKey: "weekly",
-    windowId: "weekly",
-    label: "Standard Weekly",
-    windowLabel: "Weekly",
-    durationMs: WEEK_MS,
-  },
-  {
-    tier: "standard",
-    payloadKey: "monthly",
-    windowId: "monthly",
-    label: "Standard Monthly",
-    windowLabel: "Monthly",
-  },
-  {
-    tier: "core",
-    payloadKey: "fiveHour",
-    windowId: "5h",
-    label: "Droid Core 5 Hour",
-    windowLabel: "5 Hour",
-    durationMs: FIVE_HOURS_MS,
-  },
-  {
-    tier: "core",
-    payloadKey: "weekly",
-    windowId: "weekly",
-    label: "Droid Core Weekly",
-    windowLabel: "Weekly",
-    durationMs: WEEK_MS,
-  },
-  {
-    tier: "core",
-    payloadKey: "monthly",
-    windowId: "monthly",
-    label: "Droid Core Monthly",
-    windowLabel: "Monthly",
-  },
-];
+const usageSnapshots = new Map<string, UsageSnapshot>();
+const inFlightUsageFetches = new Map<string, Promise<UsageReport | null>>();
 
-/**
- * Top-level keys that mark a body as a billing-limits response. A 2xx body
- * without any of them is treated as an unrecognized payload (transport-level
- * failure) rather than a valid legacy/unlimited account.
- */
-const RECOGNIZED_PAYLOAD_KEYS = [
-  "limits",
-  "planType",
-  "extraUsageBalanceCents",
-  "extraUsageAllowed",
-  "overagePreference",
-  "usesTokenRateLimitsBilling",
-  "tokenRateLimitsRolloutEligible",
-] as const;
-
-export interface FactoryUsageParseContext {
-  /** Factory organization id (from `OAuthCredentials.accountId`). */
-  accountId?: string;
-  email?: string;
-  /** Resolved Factory API base the payload was fetched from. */
-  endpoint: string;
-  fetchedAt: number;
+export function usageCacheKey(apiEndpoint: string, orgId?: string | null): string | null {
+  const cleanEndpoint = apiEndpoint.trim().replace(/\/+$/, "").toLowerCase();
+  const cleanOrg = orgId?.trim().toLowerCase();
+  if (!cleanOrg) return null;
+  return `${cleanEndpoint}|${cleanOrg}`;
 }
 
-interface BucketResetInfo {
-  resetsAt: number | undefined;
-  hasActiveWindow: boolean;
-}
+function waitForUsageFetch(
+  promise: Promise<UsageReport | null>,
+  signal: AbortSignal | undefined,
+): Promise<UsageReport | null> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.resolve(null);
 
-function resolveBucketReset(record: Record<string, unknown>, fetchedAt: number): BucketResetInfo {
-  const windowEndMs = typeof record.windowEnd === "string" ? Date.parse(record.windowEnd) : Number.NaN;
-  const secondsRemaining =
-    typeof record.secondsRemaining === "number" &&
-    Number.isFinite(record.secondsRemaining) &&
-    record.secondsRemaining >= 0
-      ? record.secondsRemaining
-      : undefined;
-
-  // Prefer the absolute window end; only fall back to the relative seconds
-  // when windowEnd is absent or unparseable.
-  const resetsAt = Number.isFinite(windowEndMs)
-    ? windowEndMs
-    : secondsRemaining !== undefined
-      ? fetchedAt + secondsRemaining * 1000
-      : undefined;
-
-  // A bucket whose reset is not in the future and that reports no remaining
-  // seconds has no live window (e.g. Droid Core allowances on a Standard-only
-  // plan). Keep it visible but neutral so it does not look available.
-  const hasActiveWindow = (resetsAt !== undefined && resetsAt > fetchedAt) || secondsRemaining !== undefined;
-
-  return { resetsAt, hasActiveWindow };
-}
-
-interface BucketStatusResolution {
-  status: UsageStatus;
-  notes?: string[];
-}
-
-function resolveBucketStatus(usedPercent: number, hasActiveWindow: boolean): BucketStatusResolution {
-  if (!hasActiveWindow) {
-    return { status: "unknown", notes: ["No active window for this plan"] };
-  }
-  if (usedPercent >= 100) {
-    return { status: "exhausted" };
-  }
-  if (usedPercent >= 90) {
-    return { status: "warning" };
-  }
-  return { status: "ok" };
-}
-
-function parseTierBucket(
-  bucket: unknown,
-  spec: TierBucketSpec,
-  context: FactoryUsageParseContext,
-): UsageLimit | undefined {
-  if (!isRecord(bucket)) return undefined;
-  const record = bucket;
-  const usedPercent = record.usedPercent;
-  if (typeof usedPercent !== "number" || !Number.isFinite(usedPercent)) return undefined;
-
-  const used = Math.min(100, Math.max(0, usedPercent));
-  const { resetsAt, hasActiveWindow } = resolveBucketReset(record, context.fetchedAt);
-  const { status, notes } = resolveBucketStatus(used, hasActiveWindow);
-
-  return {
-    id: `${PROVIDER_ID}:${spec.tier}:${spec.windowId}`,
-    label: spec.label,
-    scope: {
-      provider: PROVIDER_ID,
-      tier: spec.tier,
-      windowId: spec.windowId,
-      shared: true,
-      ...(context.accountId ? { accountId: context.accountId, orgId: context.accountId } : {}),
-    },
-    window: {
-      id: spec.windowId,
-      label: spec.windowLabel,
-      ...(spec.durationMs !== undefined ? { durationMs: spec.durationMs } : {}),
-      ...(resetsAt !== undefined ? { resetsAt } : {}),
-    },
-    amount: {
-      used,
-      limit: 100,
-      remaining: 100 - used,
-      usedFraction: used / 100,
-      remainingFraction: (100 - used) / 100,
-      unit: "percent",
-    },
-    status,
-    ...(notes ? { notes } : {}),
+  const pending = Promise.withResolvers<UsageReport | null>();
+  let settled = false;
+  const cleanup = () => signal.removeEventListener("abort", onAbort);
+  const finish = (report: UsageReport | null) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    pending.resolve(report);
   };
-}
-
-function createExtraUsageLimit(body: Record<string, unknown>, accountId?: string): UsageLimit | undefined {
-  const balanceCents = body.extraUsageBalanceCents;
-  if (typeof balanceCents !== "number" || !Number.isFinite(balanceCents) || balanceCents < 0) {
-    return undefined;
-  }
-
-  const notes: string[] = [];
-  if (typeof body.extraUsageAllowed === "boolean") {
-    notes.push(`Extra usage ${body.extraUsageAllowed ? "allowed" : "not allowed"}`);
-  }
-  if (typeof body.overagePreference === "string" && body.overagePreference.trim().length > 0) {
-    notes.push(`Overage preference: ${body.overagePreference}`);
-  }
-
-  return {
-    id: `${PROVIDER_ID}:extra-usage-balance`,
-    label: "Extra Usage balance",
-    scope: {
-      provider: PROVIDER_ID,
-      shared: true,
-      ...(accountId ? { accountId, orgId: accountId } : {}),
-    },
-    amount: { unit: "usd", remaining: balanceCents / 100 },
-    ...(notes.length > 0 ? { notes } : {}),
+  const fail = (error: unknown) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    pending.reject(error);
   };
+  const onAbort = () => finish(null);
+  signal.addEventListener("abort", onAbort, { once: true });
+  void promise.then(finish, fail);
+  return pending.promise;
 }
 
-function createFactoryUsageMetadata(
-  body: Record<string, unknown>,
-  context: FactoryUsageParseContext,
-): Record<string, unknown> {
-  const metadata: Record<string, unknown> = { endpoint: context.endpoint };
-  if (context.accountId) {
-    metadata.accountId = context.accountId;
-    metadata.orgId = context.accountId;
+
+export function getCachedUsageSnapshot(key: string, nowMs: number = Date.now()): UsageReport | null {
+  const entry = usageSnapshots.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= nowMs) {
+    usageSnapshots.delete(key);
+    return null;
   }
-  if (context.email) metadata.email = context.email;
-  if (typeof body.planType === "string") metadata.planType = body.planType;
-  if (typeof body.tokenRateLimitsRolloutEligible === "boolean") {
-    metadata.tokenRateLimitsRolloutEligible = body.tokenRateLimitsRolloutEligible;
-  }
-  if (typeof body.usesTokenRateLimitsBilling === "boolean") {
-    metadata.usesTokenRateLimitsBilling = body.usesTokenRateLimitsBilling;
-  }
-  if (typeof body.extraUsageAllowed === "boolean") metadata.extraUsageAllowed = body.extraUsageAllowed;
-  if (typeof body.overagePreference === "string") metadata.overagePreference = body.overagePreference;
-  return metadata;
+  return entry.report;
 }
 
-/**
- * Pure normalizer for the `/api/billing/limits` payload. Returns `null` when
- * the body is not a recognized billing-limits response; returns a report with
- * zero limits for a recognized response that carries no usable bucket (valid
- * legacy/unlimited account).
- */
-export function parseFactoryUsagePayload(
-  payload: unknown,
-  context: FactoryUsageParseContext,
-): UsageReport | null {
-  if (!isRecord(payload)) return null;
-  const body = payload;
-  if (!RECOGNIZED_PAYLOAD_KEYS.some((key) => key in body)) return null;
-
-  const limits: UsageLimit[] = [];
-  const rawLimits = body.limits;
-  const payloadLimits = isRecord(rawLimits) ? rawLimits : undefined;
-
-  for (const spec of TIER_BUCKETS) {
-    const tierSection = payloadLimits?.[spec.tier];
-    const bucket = isRecord(tierSection) ? tierSection[spec.payloadKey] : undefined;
-    const limit = parseTierBucket(bucket, spec, context);
-    if (limit) limits.push(limit);
+export function setCachedUsageSnapshot(
+  key: string,
+  report: UsageReport,
+  ttlMs: number = DEFAULT_USAGE_CACHE_TTL_MS,
+  nowMs: number = Date.now(),
+): void {
+  // Opportunistic bounded cache cleanup
+  if (usageSnapshots.size >= MAX_USAGE_CACHE_ENTRIES) {
+    for (const [k, v] of usageSnapshots.entries()) {
+      if (v.expiresAt <= nowMs) {
+        usageSnapshots.delete(k);
+      }
+    }
+    if (usageSnapshots.size >= MAX_USAGE_CACHE_ENTRIES) {
+      const firstKey = usageSnapshots.keys().next().value;
+      if (firstKey) usageSnapshots.delete(firstKey);
+    }
   }
 
-  const extraUsageLimit = createExtraUsageLimit(body, context.accountId);
-  if (extraUsageLimit) {
-    limits.push(extraUsageLimit);
-  }
+  usageSnapshots.set(key, {
+    report,
+    expiresAt: nowMs + ttlMs,
+  });
+}
 
-  const metadata = createFactoryUsageMetadata(body, context);
-
-  return {
-    provider: PROVIDER_ID,
-    fetchedAt: context.fetchedAt,
-    limits,
-    ...(body.usesTokenRateLimitsBilling === true
-      ? { notes: ["This plan bills usage with token-based rate limits; window percentages reflect token quotas."] }
-      : {}),
-    metadata,
-  };
+export function resetUsageCacheForTests(): void {
+  usageSnapshots.clear();
+  inFlightUsageFetches.clear();
 }
 
 /** Same base-URL precedence as model routing in router.ts. */
 function resolveUsageBaseUrl(params: UsageFetchParams): string {
   const base = resolveFactoryApiBase(params.credential.apiEndpoint);
   return base.replace(/\/+$/, "");
+}
+
+export interface FetchFactoryUsageDirectOptions {
+  apiEndpoint: string;
+  orgId?: string | null;
+  email?: string;
+  accessToken?: string;
+  fetchFn?: FetchImpl;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  /** Skip cache reads for an explicit usage refresh while still publishing its result. */
+  readCache?: boolean;
+  logger?: UsageFetchContext["logger"];
+}
+
+export async function fetchFactoryUsageDirect(
+  opts: FetchFactoryUsageDirectOptions,
+): Promise<UsageReport | null> {
+  const accessToken = opts.accessToken?.trim();
+  if (!accessToken) return null;
+
+  let base: string;
+  try {
+    base = resolveFactoryApiBase(opts.apiEndpoint).replace(/\/+$/, "");
+  } catch (error) {
+    opts.logger?.warn("Factory usage endpoint validation failed", {
+      reason: error instanceof Error ? error.name : "unknown",
+    });
+    return null;
+  }
+
+  const key = usageCacheKey(base, opts.orgId);
+  const now = Date.now();
+  if (key && opts.readCache !== false) {
+    const cached = getCachedUsageSnapshot(key, now);
+    if (cached) return cached;
+  }
+
+  const existingFetch = key ? inFlightUsageFetches.get(key) : undefined;
+  if (existingFetch) {
+    return waitForUsageFetch(existingFetch, opts.signal);
+  }
+
+  const performFetch = async (): Promise<UsageReport | null> => {
+    const headers: Record<string, string> = {
+      ...FACTORY_HEADERS,
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+    };
+    if (opts.orgId) {
+      headers["X-Factory-Org-Id"] = opts.orgId;
+    }
+
+    const requestTimeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_USAGE_REQUEST_TIMEOUT_MS;
+    const effectiveSignal = AbortSignal.timeout(requestTimeoutMs);
+
+    const actualFetch = opts.fetchFn ?? globalThis.fetch;
+    let response: Response;
+    try {
+      response = await actualFetch(`${base}${BILLING_LIMITS_PATH}`, {
+        method: "GET",
+        headers,
+        signal: effectiveSignal,
+      });
+    } catch (error) {
+      if (effectiveSignal?.aborted || (error instanceof Error && error.name === "AbortError")) return null;
+      opts.logger?.warn("Factory usage fetch failed", {
+        reason: error instanceof Error ? error.name : "unknown",
+      });
+      return null;
+    }
+
+    if (!response.ok) {
+      opts.logger?.warn("Factory usage request was rejected", { status: response.status });
+      return null;
+    }
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      if (effectiveSignal?.aborted || (error instanceof Error && error.name === "AbortError")) return null;
+      opts.logger?.warn("Factory usage response was not valid JSON", { status: response.status });
+      return null;
+    }
+
+    const report = parseFactoryUsagePayload(payload, {
+      accountId: opts.orgId ?? undefined,
+      email: opts.email,
+      endpoint: base,
+      fetchedAt: Date.now(),
+    });
+    if (!report) {
+      opts.logger?.warn("Factory usage response was not a recognized billing-limits payload", {
+        status: response.status,
+      });
+      return null;
+    }
+
+    if (key) {
+      setCachedUsageSnapshot(key, report);
+    }
+
+    return report;
+  };
+
+  if (key && inFlightUsageFetches.size < MAX_USAGE_CACHE_ENTRIES) {
+    const fetchPromise = performFetch().finally(() => {
+      inFlightUsageFetches.delete(key);
+    });
+    inFlightUsageFetches.set(key, fetchPromise);
+    return waitForUsageFetch(fetchPromise, opts.signal);
+  }
+
+  return waitForUsageFetch(performFetch(), opts.signal);
 }
 
 export const factoryUsageProvider: UsageProvider = {
@@ -316,67 +242,29 @@ export const factoryUsageProvider: UsageProvider = {
 
   async fetchUsage(params: UsageFetchParams, ctx: UsageFetchContext): Promise<UsageReport | null> {
     const credential = params.credential;
-    // Defense in depth alongside supports(): the billing endpoint is
-    // OAuth-only, and UsageCredential allows accessToken on any discriminant,
-    // so refuse API-key credentials here too rather than trust every caller.
     if (credential.type !== "oauth") return null;
     const accessToken = credential.accessToken?.trim();
     if (!accessToken) return null;
 
-    const base = resolveUsageBaseUrl(params);
-    const headers: Record<string, string> = {
-      ...FACTORY_HEADERS,
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-    };
-    if (credential.accountId) {
-      headers["X-Factory-Org-Id"] = credential.accountId;
-    }
-
-    let response: Response;
+    let base: string;
     try {
-      response = await ctx.fetch(`${base}${BILLING_LIMITS_PATH}`, {
-        method: "GET",
-        headers,
-        signal: params.signal,
-      });
+      base = resolveUsageBaseUrl(params);
     } catch (error) {
-      if (params.signal?.aborted || (error instanceof Error && error.name === "AbortError")) return null;
-      // Never log the error message: transport errors can embed request
-      // details (including the Authorization header) from proxy/custom fetch
-      // implementations. The error class name is enough to diagnose.
-      ctx.logger?.warn("Factory usage fetch failed", {
+      ctx.logger?.warn("Factory usage endpoint validation failed", {
         reason: error instanceof Error ? error.name : "unknown",
       });
       return null;
     }
 
-    if (!response.ok) {
-      ctx.logger?.warn("Factory usage request was rejected", { status: response.status });
-      return null;
-    }
-
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch (error) {
-      if (params.signal?.aborted || (error instanceof Error && error.name === "AbortError")) return null;
-      ctx.logger?.warn("Factory usage response was not valid JSON", { status: response.status });
-      return null;
-    }
-
-    const report = parseFactoryUsagePayload(payload, {
-      accountId: credential.accountId,
+    return fetchFactoryUsageDirect({
+      apiEndpoint: base,
+      orgId: credential.accountId,
       email: credential.email,
-      endpoint: base,
-      fetchedAt: Date.now(),
+      accessToken,
+      fetchFn: ctx.fetch,
+      signal: params.signal,
+      logger: ctx.logger,
+      readCache: false,
     });
-    if (!report) {
-      ctx.logger?.warn("Factory usage response was not a recognized billing-limits payload", {
-        status: response.status,
-      });
-      return null;
-    }
-    return report;
   },
 };

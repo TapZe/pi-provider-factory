@@ -118,9 +118,9 @@ async function captureFactoryCoreRequest(modelId: string): Promise<CapturedFacto
       },
       {
         apiKey: JSON.stringify({
-          access: "test-factory-oauth-token",
+          token: "test-factory-oauth-token",
           orgId: "test-org",
-          apiEndpoint: "http://factory.test",
+          apiEndpoint: "https://api.test.factory.ai",
         }),
         sessionId: "test-session",
       },
@@ -180,9 +180,9 @@ async function captureFactoryAnthropicRequest(
       },
       {
         apiKey: JSON.stringify({
-          access: "test-factory-oauth-token",
+          token: "test-factory-oauth-token",
           orgId: "test-org",
-          apiEndpoint: "http://factory.test",
+          apiEndpoint: "https://api.test.factory.ai",
         }),
         reasoning,
         sessionId: "test-session",
@@ -218,7 +218,7 @@ describe("Factory Router & Tool Execution Configuration", () => {
       const { body, betaHeader } = await captureFactoryAnthropicRequest(modelId, Effort.Medium);
 
       expect(body.thinking).toEqual({ type: "adaptive", display: "summarized" });
-      expect(body.output_config).toEqual({ effort: "high" });
+      expect(body.output_config).toEqual({ effort: "medium" });
       expect(betaHeader).toContain("effort-2025-11-24");
     }
   });
@@ -230,9 +230,8 @@ describe("Factory Router & Tool Execution Configuration", () => {
 
     const opus45 = await captureFactoryAnthropicRequest("claude-opus-4-5-20251101", Effort.High);
     expect(opus45.body.thinking).toMatchObject({ type: "enabled", budget_tokens: 24_576 });
-    // pi-ai 16.1.x exposes budget-effort as enabled thinking through the
-    // generic streamSimple path but does not forward output_config.effort.
-    expect(opus45.body.output_config).toBeUndefined();
+    // Current pi-ai forwards the same budget-effort control Droid sends.
+    expect(opus45.body.output_config).toEqual({ effort: "high" });
 
     const minimax = await captureFactoryAnthropicRequest("minimax-m3", Effort.High);
     expect(minimax.body.thinking).toMatchObject({ type: "enabled" });
@@ -387,9 +386,9 @@ describe("Factory Router & Tool Execution Configuration", () => {
         },
         {
           apiKey: JSON.stringify({
-            access: "test-factory-oauth-token",
+            token: "test-factory-oauth-token",
             orgId: "test-org",
-            apiEndpoint: "http://factory.test",
+            apiEndpoint: "https://api.test.factory.ai",
           }),
         },
       );
@@ -399,7 +398,7 @@ describe("Factory Router & Tool Execution Configuration", () => {
       globalThis.fetch = originalFetch;
     }
 
-    expect(capturedUrl).toBe("http://factory.test/api/llm/o/v1/responses");
+    expect(capturedUrl).toBe("https://api.test.factory.ai/api/llm/o/v1/responses");
     expect(capturedHeaders?.get("x-api-provider")).toBe("xai");
     expect(capturedHeaders?.get("openai-platform")).toBe("org-bHuLtG1fGmYk5YaOihAAXFBw");
     expect(capturedHeaders?.get("x-factory-org-id")).toBe("test-org");
@@ -435,15 +434,50 @@ describe("Factory Router & Tool Execution Configuration", () => {
         },
         {
           apiKey: JSON.stringify({
-            access: "test-factory-oauth-token",
+            token: "test-factory-oauth-token",
             orgId: "test-org",
-            apiEndpoint: "http://factory.test",
+            apiEndpoint: "https://api.test.factory.ai",
           }),
           reasoning: "max" as any,
         },
       );
 
       await stream.result();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("preserves 403 classification while redacting the selected organization", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (..._args: Parameters<typeof fetch>) =>
+      new Response(JSON.stringify({ error: { message: "account is not entitled" } }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    try {
+      const stream = factoryStreamSimple(
+        testFactoryModel("glm-5.3-flash"),
+        {
+          systemPrompt: [],
+          messages: [{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: Date.now() }],
+        },
+        {
+          apiKey: JSON.stringify({
+            token: "test-factory-oauth-token",
+            orgId: "org-sensitive-123456",
+            apiEndpoint: "https://api.test.factory.ai",
+          }),
+        },
+      );
+
+      const result = await stream.result();
+      expect(result.stopReason).toBe("error");
+      expect(result.errorStatus).toBe(403);
+      expect(result.errorMessage).toContain("source=oauth-envelope");
+      expect(result.errorMessage).toContain("X-Factory-Org-Id=org…56");
+      expect(result.errorMessage).not.toContain("org-sensitive-123456");
     } finally {
       globalThis.fetch = originalFetch;
     }
