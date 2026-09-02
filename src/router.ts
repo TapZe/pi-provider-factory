@@ -323,6 +323,16 @@ function buildTargetModel(
         }
       : undefined;
 
+  const isXHighCapable =
+    model.id === "grok-4.6" ||
+    model.id.startsWith("gpt-5.6") ||
+    model.id.startsWith("glm-5.3") ||
+    model.id.startsWith("claude-opus-5") ||
+    model.id.startsWith("claude-fable-5");
+  const defaultEffortMap: Record<string, string> = isXHighCapable
+    ? { minimal: "low", max: "xhigh" }
+    : { minimal: "low", xhigh: "high", max: "high" };
+
   const thinking =
     model.thinking ??
     (model.reasoning
@@ -330,6 +340,7 @@ function buildTargetModel(
           mode: "effort",
           efforts: FACTORY_EFFORTS,
           defaultLevel: Effort.High,
+          effortMap: defaultEffortMap,
         }
       : undefined);
 
