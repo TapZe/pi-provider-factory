@@ -149,6 +149,16 @@ export function defaultCostFor(id: string): ProviderModelConfig["cost"] {
 }
 
 export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
+  const isXHighCapable =
+    config.id === "grok-4.6" ||
+    config.id.startsWith("gpt-5.6") ||
+    config.id.startsWith("glm-5.3") ||
+    config.id.startsWith("claude-opus-5") ||
+    config.id.startsWith("claude-fable-5");
+  const defaultEffortMap: Record<string, string> = isXHighCapable
+    ? { minimal: "low", max: "xhigh" }
+    : { minimal: "low", xhigh: "high", max: "high" };
+
   const thinking =
     config.thinking ??
     (config.reasoning
@@ -156,6 +166,7 @@ export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
           mode: "effort" as const,
           efforts: FACTORY_EFFORTS,
           defaultLevel: Effort.High,
+          effortMap: defaultEffortMap,
         }
       : undefined);
 
