@@ -203,7 +203,7 @@ async function captureFactoryAnthropicRequest(
 
 describe("Factory Router & Tool Execution Configuration", () => {
   it("uses the latest Droid CLI client version", () => {
-    expect(FACTORY_CLIENT_VERSION).toBe("0.208.2");
+    expect(FACTORY_CLIENT_VERSION).toBe("0.211.0");
   });
 
   it("includes required Anthropic betas for tool streaming and thinking", () => {
@@ -212,7 +212,7 @@ describe("Factory Router & Tool Execution Configuration", () => {
   });
 
   it("uses Droid-compatible adaptive thinking for current Claude models", async () => {
-    const adaptiveModels = ["claude-fable-5", "claude-opus-5", "claude-opus-4-8"];
+    const adaptiveModels = ["claude-fable-5.1", "claude-fable-5", "claude-opus-5", "claude-opus-4-8"];
 
     for (const modelId of adaptiveModels) {
       const { body, betaHeader } = await captureFactoryAnthropicRequest(modelId, Effort.Medium);

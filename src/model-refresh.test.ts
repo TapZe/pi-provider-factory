@@ -35,6 +35,7 @@ const EXPECTED_LIMIT_GROUPS = [
     1_000_000,
     128_000,
     [
+      "claude-fable-5.1",
       "claude-fable-5",
       "claude-opus-5",
       "claude-opus-5-fast",

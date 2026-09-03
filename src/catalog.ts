@@ -204,6 +204,15 @@ export function factoryModel(config: FactoryModelInput): ProviderModelConfig {
 export const FACTORY_MODELS: ProviderModelConfig[] = [
   // Claude and Anthropic-family models
   factoryModel({
+    id: "claude-fable-5.1",
+    name: "Claude Fable 5.1 (Factory)",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
+    premiumMultiplier: 4,
+  }),
+  factoryModel({
     id: "claude-fable-5",
     name: "Claude Fable 5 (Factory)",
     reasoning: true,
