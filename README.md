@@ -10,7 +10,7 @@ This package registers a custom `factory` provider for [Oh My Pi](https://www.np
 
 Key features:
 
-- **Full Model Portfolio**: Access Claude Opus 5, GPT-5.6 Sol/Luna/Terra, Grok 4.6, GLM 5.3 / 5.3 Flash, Kimi K3, DeepSeek V4 Pro, and MiniMax M3 inside `omp`.
+- **Full Model Portfolio**: Access Claude Opus 5, GPT-6 Astra, GPT-5.6 Sol/Luna/Terra, Grok 4.6, GLM 5.3 / 5.3 Flash, Kimi K3, DeepSeek V4 Pro, and MiniMax M3 inside `omp`.
 - **Droid-Compatible Multi-Account OAuth**: Device login at `https://auth.factory.ai/device`, explicit organization selection, WorkOS token refresh, session-sticky OMP account routing, and automatic sibling failover after account quota/auth failures.
 - **Account-Isolated Routing**: Keeps each selected account's bearer, `X-Factory-Org-Id`, and validated regional endpoint together; credential endpoints must be HTTPS Factory API origins.
 - **Tri-Gateway Wire Routing**: Accurately routes to Factory's Anthropic (`/api/llm/a`), OpenAI Responses (`/api/llm/o/v1/responses`), and Fireworks (`/api/llm/o/v1/chat/completions`) endpoints.
@@ -33,7 +33,7 @@ The extension ships a curated static catalog synchronized with the authoritative
 ### GPT, Codex, and Grok models
 *Routed through Factory's OpenAI Responses gateway (`/api/llm/o/v1/responses`):*
 
-- **GPT**: `gpt-5.6-sol`, `gpt-5.6-sol-fast`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.5-fast`, `gpt-5.4`, `gpt-5.4-fast`, `gpt-5.4-mini`, `gpt-5.4-mini-fast`, `gpt-5.2`, `gpt-5.1`, `gpt-5` (`x-api-provider: openai`)
+- **GPT**: `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-sol-fast`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.5-fast`, `gpt-5.4`, `gpt-5.4-fast`, `gpt-5.4-mini`, `gpt-5.4-mini-fast`, `gpt-5.2`, `gpt-5.1`, `gpt-5` (`x-api-provider: openai`)
 - **Codex**: `gpt-5.3-codex`, `gpt-5.3-codex-fast`, `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5-codex` (`x-api-provider: openai`)
 - **Grok**: `grok-4.6`, `grok-4.5` (`x-api-provider: xai`)
 

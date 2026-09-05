@@ -203,7 +203,7 @@ async function captureFactoryAnthropicRequest(
 
 describe("Factory Router & Tool Execution Configuration", () => {
   it("uses the latest Droid CLI client version", () => {
-    expect(FACTORY_CLIENT_VERSION).toBe("0.211.0");
+    expect(FACTORY_CLIENT_VERSION).toBe("0.213.0");
   });
 
   it("includes required Anthropic betas for tool streaming and thinking", () => {
@@ -312,6 +312,8 @@ describe("Factory Router & Tool Execution Configuration", () => {
     expect(upstreamProviderFor("minimax-m3")).toBe("fireworks");
     expect(familyOf("gpt-5.6-sol")).toBe("openai-responses");
     expect(upstreamProviderFor("gpt-5.6-sol")).toBe("openai");
+    expect(familyOf("gpt-6-astra")).toBe("openai-responses");
+    expect(upstreamProviderFor("gpt-6-astra")).toBe("openai");
     expect(familyOf("kimi-k3")).toBe("openai-completions");
     expect(upstreamProviderFor("kimi-k3")).toBe("fireworks");
     expect(familyOf("grok-4.6")).toBe("openai-responses");
@@ -410,6 +412,7 @@ describe("Factory Router & Tool Execution Configuration", () => {
     expect(identityFor("grok-4.5")).toEqual({ class: "xai", family: "grok" });
     expect(identityFor("glm-5.3-flash")).toEqual({ class: "glm", family: "glm" });
     expect(identityFor("gpt-5.6-sol")).toEqual({ class: "openai", family: "gpt" });
+    expect(identityFor("gpt-6-astra")).toEqual({ class: "openai", family: "gpt" });
     expect(identityFor("claude-opus-5")).toEqual({ class: "anthropic", family: "opus" });
     expect(FACTORY_EFFORTS).toContain("max");
 

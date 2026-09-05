@@ -63,6 +63,14 @@ export function defaultCostFor(id: string): ProviderModelConfig["cost"] {
   }
 
   // GPT family (OpenAI does not bill prompt cache creation / cacheWrite = 0)
+  if (
+    id === "gpt-6-astra" ||
+    id.startsWith("gpt-6-astra") ||
+    id === "gpt6-astra" ||
+    id.startsWith("gpt6-astra")
+  ) {
+    return { input: 10, output: 50, cacheRead: 1.0, cacheWrite: 0 };
+  }
   if (id === "gpt-5.6-sol-fast" || id.startsWith("gpt-5.6-sol-fast")) {
     return { input: 10, output: 60, cacheRead: 1.0, cacheWrite: 0 };
   }
@@ -340,6 +348,15 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
   }),
 
   // GPT and Codex models
+  factoryModel({
+    id: "gpt-6-astra",
+    name: "GPT-6 Astra (Factory)",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
+    premiumMultiplier: 1.6,
+  }),
   factoryModel({
     id: "gpt-5.6-sol",
     name: "GPT-5.6 Sol (Factory)",
@@ -666,7 +683,7 @@ export function familyOf(id: string): FactoryModelFamily {
     return "anthropic";
   }
 
-  if (id.startsWith("gpt-") || id.endsWith("-codex") || id.startsWith("grok-")) {
+  if (id.startsWith("gpt-") || id.startsWith("gpt6") || id.endsWith("-codex") || id.startsWith("grok-")) {
     return "openai-responses";
   }
 
@@ -695,7 +712,7 @@ export function upstreamProviderFor(id: string): FactoryUpstreamProvider {
     return "anthropic";
   }
 
-  if (id.startsWith("gpt-") || id.endsWith("-codex")) {
+  if (id.startsWith("gpt-") || id.startsWith("gpt6") || id.endsWith("-codex")) {
     return "openai";
   }
 
@@ -714,7 +731,7 @@ export function identityFor(id: string): ModelIdentity {
   if (id.startsWith("minimax-")) {
     return { class: "minimax", family: "minimax" };
   }
-  if (id.startsWith("gpt-") || id.endsWith("-codex")) {
+  if (id.startsWith("gpt-") || id.startsWith("gpt6") || id.endsWith("-codex")) {
     return { class: "openai", family: "gpt" };
   }
   if (id.startsWith("grok-")) {
@@ -746,6 +763,7 @@ export function factoryQuotaTierFor(id: string): FactoryQuotaTier {
     id.startsWith("atlas-") ||
     id.startsWith("aster-") ||
     id.startsWith("gpt-") ||
+    id.startsWith("gpt6") ||
     id.endsWith("-codex") ||
     id.startsWith("grok-")
   ) {

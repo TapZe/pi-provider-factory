@@ -56,6 +56,7 @@ describe("Quota Preflight and Model Tier Classification", () => {
     expect(factoryQuotaTierFor("claude-opus-5")).toBe("standard");
     expect(factoryQuotaTierFor("claude-sonnet-4-6")).toBe("standard");
     expect(factoryQuotaTierFor("gpt-5.6-sol")).toBe("standard");
+    expect(factoryQuotaTierFor("gpt-6-astra")).toBe("standard");
     expect(factoryQuotaTierFor("gpt-5.3-codex")).toBe("standard");
     expect(factoryQuotaTierFor("grok-4.6")).toBe("standard");
     expect(factoryQuotaTierFor("glm-5.3")).toBe("core");

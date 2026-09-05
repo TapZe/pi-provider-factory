@@ -55,6 +55,7 @@ const EXPECTED_LIMIT_GROUPS = [
     1_050_000,
     128_000,
     [
+      "gpt-6-astra",
       "gpt-5.6-sol",
       "gpt-5.6-sol-fast",
       "gpt-5.6-terra",
@@ -232,6 +233,7 @@ describe("matchLivePrice", () => {
   const { matchLivePrice } = require("./model-refresh");
   const liveMap = new Map([
     ["anthropic/claude-opus-5", { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 0 }],
+    ["openai/gpt-6-astra", { input: 10, output: 50, cacheRead: 1.0, cacheWrite: 0 }],
     ["moonshotai/kimi-k3", { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 }],
   ]);
 
@@ -240,6 +242,11 @@ describe("matchLivePrice", () => {
     expect(opus).toBeDefined();
     expect(opus.input).toBe(5);
     expect(opus.output).toBe(25);
+
+    const astra = matchLivePrice("gpt-6-astra", liveMap);
+    expect(astra).toBeDefined();
+    expect(astra.input).toBe(10);
+    expect(astra.output).toBe(50);
 
     const kimi = matchLivePrice("kimi-k3", liveMap);
     expect(kimi).toBeDefined();
