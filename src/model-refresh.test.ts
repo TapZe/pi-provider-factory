@@ -38,7 +38,7 @@ const FIXTURE = `
 
 const EXPECTED_LIMIT_GROUPS = [
   // Droid Ue: input 872_000 + output 128_000.
-  [1_000_000, 128_000, ["claude-sonnet-5", "claude-opus-5-5", "claude-opus-5-5-fast"]],
+  [1_000_000, 128_000, ["claude-sonnet-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5-5-fast"]],
   // Droid rBT: input 867_000 + output 128_000.
   [
     995_000,
@@ -100,7 +100,7 @@ const EXPECTED_LIMIT_GROUPS = [
   [262_144, 65_536, ["kimi-k3", "kimi-k2.7-code", "kimi-k2.6"]],
   [288_768, 32_768, ["kimi-k2.5"]],
   [262_144, 131_072, ["qwen3.8-max"]],
-  [1_040_000, 131_072, ["deepseek-v4-flash-0731", "deepseek-v4-pro"]],
+  [1_040_000, 131_072, ["deepseek-v4.1-flash", "deepseek-v4-flash-0731", "deepseek-v4-pro"]],
   [512_000, 64_000, ["minimax-m3"]],
   [260_600, 64_000, ["minimax-m2.7"]],
   [268_800, 64_000, ["minimax-m2.5"]],
@@ -143,15 +143,18 @@ describe("Factory model token limits", () => {
 });
 
 describe("static catalog gating", () => {
-  test("omits the flag-gated deepseek-v4.1-flash ID from the curated list", () => {
-    // Factory gates deepseek-v4.1-flash behind a default-off feature flag and
-    // docs.factory.ai/models does not list it yet; statically cataloging it
-    // makes every request fail with HTTP 400 "Invalid model ID in request body".
-    expect(FACTORY_MODELS.some((model) => model.id === "deepseek-v4.1-flash")).toBe(false);
-    // Supported DeepSeek siblings stay curated.
+  test("curates deepseek-v4.1-flash now that Factory docs publish it", () => {
+    // docs.factory.ai/models lists deepseek-v4.1-flash and Droid 0.228.1 ships
+    // binary-audited limits for it, so the ID is now curated statically.
+    const v41 = FACTORY_MODELS.find((model) => model.id === "deepseek-v4.1-flash");
+    expect(v41).toBeDefined();
+    // Binary-audited V4.1 limits: 1_040_000 total window / 131_072 output, image input.
+    expect(v41?.contextWindow).toBe(1_040_000);
+    expect(v41?.maxTokens).toBe(131_072);
+    expect(v41?.input).toEqual(["text", "image"]);
+    // Deprecated DeepSeek siblings stay curated and text-only.
     expect(FACTORY_MODELS.some((model) => model.id === "deepseek-v4-flash-0731")).toBe(true);
     expect(FACTORY_MODELS.some((model) => model.id === "deepseek-v4-pro")).toBe(true);
-    // Curated siblings stay text-only; image input is exclusive to rediscovered V4.1.
     expect(FACTORY_MODELS.find((model) => model.id === "deepseek-v4-flash-0731")?.input).toEqual(["text"]);
     expect(FACTORY_MODELS.find((model) => model.id === "deepseek-v4-pro")?.input).toEqual(["text"]);
   });
@@ -258,7 +261,9 @@ describe("fetchFactoryDynamicModels", () => {
 
     const models = await fetchFactoryDynamicModels();
     expect(models.some((model) => model.id === "claude-future")).toBe(true);
-    expect(models.some((model) => model.id === "deepseek-v4.1-flash")).toBe(false);
+    // Now curated statically, so docs discovery keeps the entry (via the static
+    // catalog) rather than dropping it.
+    expect(models.some((model) => model.id === "deepseek-v4.1-flash")).toBe(true);
   });
 
   test("uses conservative family limits for newly discovered model IDs", async () => {
@@ -287,7 +292,7 @@ describe("fetchFactoryDynamicModels", () => {
     expect(limitsFor("kimi-future")).toEqual([200_000, 32_000]);
   });
 
-  test("picks up deepseek-v4.1-flash once Factory publishes it to the docs", async () => {
+  test("docs discovery neither duplicates nor downgrades the static deepseek-v4.1-flash entry", async () => {
     const docs = `
 | Model | Model ID | Multiplier | Reasoning |
 | --- | --- | --- | --- |
@@ -302,15 +307,15 @@ describe("fetchFactoryDynamicModels", () => {
     }) as typeof fetch;
 
     const models = await fetchFactoryDynamicModels();
-    const v41 = models.find((model) => model.id === "deepseek-v4.1-flash");
-    expect(v41).toBeDefined();
-    // Staged audited metadata must win over conservative family defaults:
-    // binary-audited V4.1 is 1_040_000/131_072 and image-capable.
-    expect(v41?.contextWindow).toBe(1_040_000);
-    expect(v41?.maxTokens).toBe(131_072);
-    expect(v41?.input).toEqual(["text", "image"]);
-    // Cost must come from the preserved deepseek-v4.1 defaultCostFor branch, not the generic DeepSeek rate.
-    expect(v41?.cost).toEqual({ input: 0.1, output: 0.27, cacheRead: 0.01, cacheWrite: 0 });
+    const v41 = models.filter((model) => model.id === "deepseek-v4.1-flash");
+    // The merge path must keep exactly one entry: the static audited one.
+    expect(v41).toHaveLength(1);
+    // Binary-audited limits survive the merge; conservative family defaults
+    // must not replace them.
+    expect(v41[0]?.contextWindow).toBe(1_040_000);
+    expect(v41[0]?.maxTokens).toBe(131_072);
+    expect(v41[0]?.input).toEqual(["text", "image"]);
+    expect(v41[0]?.cost).toEqual({ input: 0.1, output: 0.27, cacheRead: 0.01, cacheWrite: 0 });
   });
 });
 

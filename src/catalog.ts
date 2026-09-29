@@ -136,8 +136,8 @@ export function defaultCostFor(id: string): ProviderModelConfig["cost"] {
   if (id === "inkling" || id.startsWith("inkling-")) {
     return { input: 1.0, output: 3.0, cacheRead: 0.1, cacheWrite: 0 };
   }
-  // Kept despite `deepseek-v4.1-flash` being absent from FACTORY_MODELS: dynamic
-  // docs discovery routes newly published V4.1 IDs through this branch.
+  // `deepseek-v4.1-*` keeps its own branch: the static catalog entry plus any
+  // future docs-published V4.1 revisions bill below the generic DeepSeek rate.
   if (id === "deepseek-v4.1-flash" || id.startsWith("deepseek-v4.1-")) {
     return { input: 0.1, output: 0.27, cacheRead: 0.01, cacheWrite: 0 };
   }
@@ -246,6 +246,7 @@ export function factoryThinkingFor(
     modelId.startsWith("gpt-5.6") ||
     modelId.startsWith("glm-5.3") ||
     modelId.startsWith("claude-opus-5") ||
+    modelId.startsWith("claude-sonnet-5") ||
     modelId.startsWith("claude-fable-5") ||
     modelId.startsWith("qwen");
 
@@ -400,6 +401,15 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     premiumMultiplier: 2,
   }),
   factoryModel({
+    id: "claude-sonnet-5-5",
+    name: "Claude Sonnet 5.5 (Factory)",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
+    premiumMultiplier: 0.8,
+  }),
+  factoryModel({
     id: "claude-sonnet-5",
     name: "Claude Sonnet 5 (Factory)",
     reasoning: true,
@@ -453,7 +463,6 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     maxTokens: 128_000,
     premiumMultiplier: 2,
   }),
-
   // GPT and Codex models
   factoryModel({
     id: "gpt-6-astra",
@@ -462,7 +471,7 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     input: ["text", "image"],
     contextWindow: 1_050_000,
     maxTokens: 128_000,
-    premiumMultiplier: 1.6,
+    premiumMultiplier: 4,
   }),
   factoryModel({
     id: "gpt-6-sol",
@@ -783,13 +792,20 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     maxTokens: 32_768,
     premiumMultiplier: 0.25,
   }),
-  // `deepseek-v4.1-flash` is deliberately absent from the static catalog: Factory
-  // gates it behind a default-off feature flag and it is not yet published on
-  // docs.factory.ai/models, so requesting it returns HTTP 400 "Invalid model ID
-  // in request body". Dynamic discovery merges it in once Factory documents it.
+  // Promoted to the static catalog 2026-09: docs.factory.ai/models now publishes
+  // `deepseek-v4.1-flash` and Droid 0.228.1 ships binary-audited limits for it.
+  factoryModel({
+    id: "deepseek-v4.1-flash",
+    name: "DeepSeek V4.1 Flash (Factory Core)",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 1_040_000,
+    maxTokens: 131_072,
+    premiumMultiplier: 0.12,
+  }),
   factoryModel({
     id: "deepseek-v4-flash-0731",
-    name: "DeepSeek V4 Flash (Factory Core)",
+    name: "DeepSeek V4 Flash [Deprecated] (Factory Core)",
     reasoning: true,
     input: ["text"],
     contextWindow: 1_040_000,
@@ -798,7 +814,7 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
   }),
   factoryModel({
     id: "deepseek-v4-pro",
-    name: "DeepSeek V4 Pro (Factory Core)",
+    name: "DeepSeek V4 Pro [Deprecated] (Factory Core)",
     reasoning: true,
     input: ["text"],
     contextWindow: 1_040_000,
@@ -868,7 +884,7 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     input: ["text", "image"],
     contextWindow: 1_065_536,
     maxTokens: 65_536,
-    premiumMultiplier: 0.3,
+    premiumMultiplier: 0.6,
   }),
   factoryModel({
     id: "gemini-3.6-flash",
