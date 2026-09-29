@@ -1,6 +1,6 @@
 {
   "name": "omp-provider-factory-droid",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Factory.ai provider extension for Oh My Pi (omp) with Droid OAuth, Quad-Gateway routing, and quota-aware failover.",
   "type": "module",
   "author": "Muhammad Nabil Muyassar Rahman <https://github.com/TapZe>",
