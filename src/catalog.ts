@@ -81,7 +81,14 @@ export function defaultCostFor(id: string): ProviderModelConfig["cost"] {
   ) {
     return { input: 10, output: 50, cacheRead: 1.0, cacheWrite: 0 };
   }
-  if (id === "gpt-6-sol" || id.startsWith("gpt-6-sol-")) {
+  // Factory publishes only GPT-6.1 Sol's 0.8x subscription multiplier, not
+  // token prices; use the existing GPT-6 Sol estimate until live pricing resolves.
+  if (
+    id === "gpt-6-sol" ||
+    id.startsWith("gpt-6-sol-") ||
+    id === "gpt-6.1-sol" ||
+    id.startsWith("gpt-6.1-sol-")
+  ) {
     return { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 };
   }
   if (id === "gpt-6-luna" || id.startsWith("gpt-6-luna-")) {
@@ -481,6 +488,23 @@ export const FACTORY_MODELS: ProviderModelConfig[] = [
     contextWindow: 1_050_000,
     maxTokens: 128_000,
     premiumMultiplier: 0.8,
+  }),
+  factoryModel({
+    id: "gpt-6.1-sol",
+    name: "GPT-6.1 Sol (Factory)",
+    reasoning: true,
+    input: ["text", "image"],
+    contextWindow: 1_050_000,
+    maxTokens: 128_000,
+    premiumMultiplier: 0.8,
+    // Droid 0.230.0 registry: default medium, ladder low→max. Minimal is not
+    // wire-supported and degrades to low; xhigh/max pass through unchanged.
+    thinking: {
+      mode: "effort",
+      efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, FACTORY_MAX_EFFORT],
+      defaultLevel: Effort.Medium,
+      effortMap: { [Effort.Minimal]: "low" },
+    },
   }),
   factoryModel({
     id: "gpt-6-luna",

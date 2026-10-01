@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { Effort } from "@oh-my-pi/pi-ai";
 
 import { fetchFactoryDynamicModels, parseFactoryModelDocs } from "./model-refresh";
 import { FACTORY_MODELS } from "./catalog";
@@ -68,6 +69,7 @@ const EXPECTED_LIMIT_GROUPS = [
     [
       "gpt-6-astra",
       "gpt-6-sol",
+      "gpt-6.1-sol",
       "gpt-6-luna",
       "gpt-5.6-sol",
       "gpt-5.6-sol-fast",
@@ -157,6 +159,22 @@ describe("static catalog gating", () => {
     expect(FACTORY_MODELS.some((model) => model.id === "deepseek-v4-pro")).toBe(true);
     expect(FACTORY_MODELS.find((model) => model.id === "deepseek-v4-flash-0731")?.input).toEqual(["text"]);
     expect(FACTORY_MODELS.find((model) => model.id === "deepseek-v4-pro")?.input).toEqual(["text"]);
+  });
+
+  test("curates gpt-6.1-sol with sol-family cost and Droid binary thinking ladder", () => {
+    const sol61 = FACTORY_MODELS.find((model) => model.id === "gpt-6.1-sol");
+    expect(sol61).toBeDefined();
+    expect(sol61?.input).toEqual(["text", "image"]);
+    // No live $/M pricing yet: cost must come from the gpt-6-sol family
+    // branch, never the generic defaultCostFor fallback.
+    expect(sol61?.cost).toEqual({ input: 2, output: 12, cacheRead: 0.2, cacheWrite: 0 });
+    expect(sol61?.premiumMultiplier).toBe(0.8);
+    // Droid 0.230.0 registry: default medium, ladder low→max, minimal
+    // degraded to low on the wire.
+    expect(sol61?.thinking?.mode).toBe("effort");
+    expect(sol61?.thinking?.efforts.map(String)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(sol61?.thinking?.defaultLevel).toBe(Effort.Medium);
+    expect(sol61?.thinking?.effortMap?.minimal).toBe("low");
   });
 });
 

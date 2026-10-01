@@ -26,7 +26,7 @@
 
 ## Supported Models
 
-Curated static catalog synchronized with Droid CLI v0.226.1, augmented by dynamic discovery:
+Curated static catalog synchronized with the Droid CLI 0.230.0 model registry and Factory's published model list, augmented by dynamic discovery. Feature-gated models require access on the selected Factory organization.
 
 ### 1. Claude and Anthropic Family
 *Wire Endpoint: `POST /api/llm/a/v1/messages`*
@@ -39,7 +39,7 @@ Curated static catalog synchronized with Droid CLI v0.226.1, augmented by dynami
 
 ### 3. GPT, Codex, and Grok Family
 *Wire Endpoint: `POST /api/llm/o/v1/responses`*
-- **GPT**: `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-sol-fast`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.5-fast`, `gpt-5.4`, `gpt-5.4-fast`, `gpt-5.4-mini`, `gpt-5.4-mini-fast`, `gpt-5.2`, `gpt-5.1`, `gpt-5` (`x-api-provider: openai`)
+- **GPT**: `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-sol-fast`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.5-fast`, `gpt-5.4`, `gpt-5.4-fast`, `gpt-5.4-mini`, `gpt-5.4-mini-fast`, `gpt-5.2`, `gpt-5.1`, `gpt-5` (`x-api-provider: openai`)
 - **Codex**: `gpt-5.3-codex`, `gpt-5.3-codex-fast`, `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5-codex` (`x-api-provider: openai`)
 - **Grok**: `grok-4.7`, `grok-4.6`, `grok-4.5` (`x-api-provider: xai`)
 
@@ -47,8 +47,7 @@ Curated static catalog synchronized with Droid CLI v0.226.1, augmented by dynami
 *Wire Endpoint: `POST /api/llm/o/v1/chat/completions`*
 - **GLM**: `glm-5.3`, `glm-5.3-flash`, `glm-5.2`, `glm-5.2-fast`, `glm-5.1`, `glm-5`, `glm-4.7`, `glm-4.6` (`x-api-provider: fireworks`)
 - **Kimi**: `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `kimi-k2.5` (`x-api-provider: fireworks`)
-- **DeepSeek**: `deepseek-v4-flash-0731`, `deepseek-v4-pro` (`x-api-provider: fireworks`)
-  - `deepseek-v4.1-flash` is intentionally not in the static catalog: Factory gates it behind a default-off feature flag and it is absent from docs.factory.ai/models, so requesting it fails with HTTP 400 ("Invalid model ID in request body"). It is discovered automatically once Factory publishes it (see Dynamic Discovery below).
+- **DeepSeek**: `deepseek-v4.1-flash`, `deepseek-v4-flash-0731`, `deepseek-v4-pro` (`x-api-provider: fireworks`); V4.1 Flash accepts images, while the deprecated V4 variants are text-only.
 - **Qwen**: `qwen3.8-max` (`x-api-provider: fireworks`)
 - **Nemotron / Inkling**: `nemotron-3-ultra`, `inkling` (`x-api-provider: fireworks`)
 - **Mistral**: `mistral-medium-3.5` (`x-api-provider: mistral`)
